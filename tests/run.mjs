@@ -233,7 +233,7 @@ await test('名前・タグで家具を絞り込める', async () => {
     await evaluate(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
     await evaluate(`[...document.querySelectorAll('#tags .tag')].find(b => b.textContent === '収納').click()`);
     const n = await count();
-    assert(n === 5, `収納のタグで 5 つにならない: ${n}`);
+    assert(n === 6, `収納のタグで 6 つにならない: ${n}`);
     await evaluate(`(() => { const s = document.getElementById('search'); s.value = 'zzz'; s.dispatchEvent(new Event('input')); })()`);
     assert(await count() === 0 && await evaluate(`!!document.querySelector('#items .empty')`), '見つからないときの表示がない');
     await evaluate(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
@@ -491,6 +491,15 @@ await test('小物は少し外れた所を押しても選べる', async () => {
     await evaluate(`document.querySelector('#items .item[data-type="mug"]').click()`);
     const uid = await L('L.selected()');
     await L('L.select(null)');
+    // ほかの家具に隠れない場所を探して置く
+    const found = await L(`(() => { const it = L.game().items.find(i => i.uid === ${uid});
+        for (let gz = 11; gz >= 0; gz--) for (let gx = 0; gx < 12; gx++) {
+            it.gx = gx; it.gz = gz; L.rebuildAll();
+            if (L.isBlocked(it)) continue;
+            const p = L.screenOf(${uid}, 0.06);
+            if (L.pickItem(p.x, p.y, 0) === ${uid} && L.pickItem(p.x + 16, p.y + 6, 0) === null) return true;
+        } return false; })()`);
+    assert(found === true, '見える場所が見つからない');
     const p = await L(`L.screenOf(${uid}, 0.06)`);
     assert(await L(`L.pickItem(${p.x}, ${p.y}, 0)`) === uid, '真ん中を押しても選べない');
     assert(await L(`L.pickItem(${p.x + 16}, ${p.y + 6}, 22)`) === uid, '少し外れた所で選べない');

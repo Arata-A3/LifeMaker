@@ -1,6 +1,6 @@
 import * as THREE from '../lib/three.module.min.js';
 
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.6.0';
 const SAVE_KEY = 'lifemaker_save';
 const SAVE_VERSION = 3; // 2: 家具の色を部位ごとに、床と壁を追加 / 3: テレビをテレビ台から分けた
 
@@ -146,6 +146,39 @@ const FURNITURE = {
             for (const x of [-0.35, 0.35]) {
                 box(g, 0.66, 0.3, 0.008, c.front, x, 0.06, 0.214);
                 box(g, 0.12, 0.02, 0.02, c.handle, x, 0.18, 0.226);
+            }
+        },
+    },
+    desk: {
+        name: '机', icon: '✏️', size: [2, 1], top: 0.72, tags: ['テーブル', '書斎', 'ナチュラル', '木'],
+        slots: [['main', '天板', '#c89a6a'], ['legs', '脚', '#6b5847'], ['drawer', '引き出し', '#b88b5c']],
+        build(g, c) {
+            box(g, 0.96, 0.04, 0.46, c.main, 0, 0.68, 0);
+            for (const x of [-0.44, 0.44]) for (const z of [-0.19, 0.19]) box(g, 0.04, 0.68, 0.04, c.legs, x, 0, z);
+            box(g, 0.84, 0.12, 0.02, c.legs, 0, 0.55, -0.19);
+            box(g, 0.4, 0.1, 0.42, c.drawer, 0.2, 0.565, 0);
+            box(g, 0.06, 0.015, 0.015, c.legs, 0.2, 0.608, 0.2175);
+        },
+    },
+    nightstand: {
+        name: 'サイドテーブル', icon: '🌙', size: [1, 1], top: 0.52, tags: ['テーブル', '寝室', 'シンプル'],
+        slots: [['main', '本体', '#d9c7aa'], ['front', '引き出し', '#e8dcc6'], ['handle', '取っ手', '#8a7a66']],
+        build(g, c) {
+            box(g, 0.4, 0.5, 0.38, c.main, 0, 0, -0.02);
+            box(g, 0.42, 0.02, 0.4, c.main, 0, 0.5, -0.02);
+            box(g, 0.34, 0.18, 0.008, c.front, 0, 0.28, 0.174);
+            box(g, 0.05, 0.015, 0.015, c.handle, 0, 0.36, 0.1855);
+        },
+    },
+    chest: {
+        name: 'チェスト', icon: '🗃', size: [2, 1], top: 0.8, tags: ['収納', '寝室', 'ナチュラル', '木'],
+        slots: [['main', '本体', '#a8794f'], ['front', '引き出し', '#b98b5e'], ['handle', '取っ手', '#e8dcc6']],
+        build(g, c) {
+            box(g, 0.9, 0.8, 0.42, c.main, 0, 0, -0.02);
+            for (let i = 0; i < 3; i++) {
+                const y = 0.06 + i * 0.245;
+                box(g, 0.82, 0.22, 0.008, c.front, 0, y, 0.194);
+                box(g, 0.16, 0.02, 0.02, c.handle, 0, y + 0.1, 0.208);
             }
         },
     },
@@ -1119,6 +1152,7 @@ function ndc(x, y) {
 // 小物は小さくて押しにくいので、指の近く（radius px 以内）にあれば選ぶ
 function nearSmall(x, y, radius) {
     const r = canvas.getBoundingClientRect();
+    furnitureRoot.updateMatrixWorld();
     let best = null, bestD = radius;
     for (const it of game.items) {
         if (kindOf(it) !== 'small') continue;
@@ -1139,6 +1173,7 @@ function pickItem(x, y, radius = 0) {
     return hit;
 }
 function pickByRay(x, y) {
+    furnitureRoot.updateMatrixWorld(); // 置いた直後でまだ描いていない家具も当たるように
     raycaster.setFromCamera(ndc(x, y), camera);
     const hits = raycaster.intersectObjects(furnitureRoot.children, true);
     let flatHit = null;
