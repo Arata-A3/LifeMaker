@@ -20,7 +20,7 @@
 <meta property="og:image:height" content="512">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="css/style.css?v=0.2.0">
+<link rel="stylesheet" href="css/style.css?v=0.3.0">
 </head>
 <body>
 <div id="app">
@@ -35,6 +35,10 @@
     <main>
         <div id="view">
             <canvas id="scene"></canvas>
+            <div id="history">
+                <button id="undo-btn" class="round-btn" aria-label="元に戻す" title="元に戻す (Ctrl+Z)" disabled>↶</button>
+                <button id="redo-btn" class="round-btn" aria-label="やり直す" title="やり直す (Ctrl+Y)" disabled>↷</button>
+            </div>
             <div id="hint">家具を選んで置こう。ダブルタップで回転、ドラッグで部屋を回せます</div>
             <div id="toolbar" hidden>
                 <span id="sel-name"></span>
@@ -45,12 +49,19 @@
             </div>
         </div>
 
-        <section id="catalog" aria-label="家具">
-            <div id="filters">
-                <input id="search" type="search" placeholder="🔍 さがす" aria-label="家具を名前やタグで探す" autocomplete="off">
-                <div id="tags" role="group" aria-label="タグで絞り込む"></div>
+        <section id="catalog" aria-label="家具と床・壁">
+            <div id="tabs" role="tablist">
+                <button class="tab" role="tab" data-tab="furniture" aria-selected="true">🛋 家具</button>
+                <button class="tab" role="tab" data-tab="surface" aria-selected="false">🧱 床・壁</button>
             </div>
-            <div id="items"></div>
+            <div id="furniture-panel">
+                <div id="filters">
+                    <input id="search" type="search" placeholder="🔍 さがす" aria-label="家具を名前やタグで探す" autocomplete="off">
+                    <div id="tags" role="group" aria-label="タグで絞り込む"></div>
+                </div>
+                <div id="items"></div>
+            </div>
+            <div id="surface-panel" hidden></div>
         </section>
     </main>
 
@@ -75,6 +86,7 @@
         <span class="cd-preview"></span>
         <div><div class="cd-title"></div><div class="cd-hex"></div></div>
     </div>
+    <div class="cd-parts" role="group" aria-label="色を変える部分"></div>
     <section class="cd-recent-sec"><h3>最近使った色</h3><div class="cd-recent swatches"></div></section>
     <section class="cd-same-sec"><h3>ほかの家具と同じ色</h3><div class="cd-same"></div></section>
     <section><h3>色の候補</h3><div class="cd-palette swatches"></div></section>
@@ -99,6 +111,6 @@
 
 <div id="toast" role="status"></div>
 
-<script type="module" src="js/app.js?v=0.2.0"></script>
+<script type="module" src="js/app.js?v=0.3.0"></script>
 </body>
 </html>

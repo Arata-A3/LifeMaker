@@ -1,8 +1,8 @@
 import * as THREE from '../lib/three.module.min.js';
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 const SAVE_KEY = 'lifemaker_save';
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2; // 2: 家具の色を部位ごとに、床と壁を追加
 
 // 部屋の大きさ: 1 マス 0.5m、12×12 マス（6m 四方）
 const CELL = 0.5;
@@ -12,69 +12,76 @@ const WALL_H = 2.6;
 const WALL_T = 0.1;
 
 // ---------- 家具の定義 ----------
-// size: [横, 奥行き]（マス）。正面は +z。build は足元の中心を原点に作る。
+// size: [横, 奥行き]（マス）。正面は +z。build(g, c) は足元の中心を原点に作る。
+// slots: 色を変えられる部位。c.<key> にその部位の色が入る。最初の部位が一覧の見本の色。
+// 面がぴったり重なるとチラつくので、部品どうしは少し（2〜5mm）ずらして重ねる。
 const FURNITURE = {
     bed: {
-        name: 'ベッド', icon: '🛏', color: '#7fa7c9', size: [2, 4], tags: ['寝る', '寝室', 'ナチュラル', '木'],
+        name: 'ベッド', icon: '🛏', size: [2, 4], tags: ['寝る', '寝室', 'ナチュラル', '木'],
+        slots: [['main', '掛け布団', '#7fa7c9'], ['frame', 'フレーム', '#a8794f'], ['sheet', 'シーツ・枕', '#f4f1ea']],
         build(g, c) {
-            box(g, 1.0, 0.3, 2.0, '#a8794f', 0, 0, 0);
-            box(g, 1.0, 0.8, 0.08, '#a8794f', 0, 0, -0.96);
-            box(g, 0.94, 0.18, 1.9, '#f4f1ea', 0, 0.3, 0);
-            box(g, 0.6, 0.1, 0.3, '#ffffff', 0, 0.48, -0.72);
-            box(g, 0.98, 0.07, 1.25, c, 0, 0.46, 0.32);
+            box(g, 1.0, 0.3, 2.0, c.frame, 0, 0, 0);
+            box(g, 1.02, 0.8, 0.08, c.frame, 0, 0, -0.965);
+            box(g, 0.94, 0.18, 1.9, c.sheet, 0, 0.3, 0);
+            box(g, 0.6, 0.1, 0.3, shade(c.sheet, 0.05), 0, 0.48, -0.72);
+            box(g, 0.98, 0.07, 1.25, c.main, 0, 0.46, 0.32);
         },
     },
     sofa: {
-        name: 'ソファ', icon: '🛋', color: '#8aa58c', size: [4, 2], tags: ['座る', 'リビング', 'ナチュラル', '布'],
+        name: 'ソファ', icon: '🛋', size: [4, 2], tags: ['座る', 'リビング', 'ナチュラル', '布'],
+        slots: [['main', '布', '#8aa58c'], ['cushion', 'クッション', '#a7bea8'], ['legs', '脚', '#5b4636']],
         build(g, c) {
-            box(g, 1.9, 0.4, 0.86, c, 0, 0.06, 0);
-            box(g, 1.9, 0.5, 0.2, c, 0, 0.36, -0.33);
-            box(g, 0.18, 0.26, 0.86, c, -0.86, 0.46, 0);
-            box(g, 0.18, 0.26, 0.86, c, 0.86, 0.46, 0);
-            box(g, 0.74, 0.1, 0.6, shade(c, 0.12), -0.38, 0.46, 0.08);
-            box(g, 0.74, 0.1, 0.6, shade(c, 0.12), 0.38, 0.46, 0.08);
-            for (const x of [-0.85, 0.85]) for (const z of [-0.36, 0.36]) box(g, 0.06, 0.06, 0.06, '#5b4636', x, 0, z);
+            box(g, 1.9, 0.4, 0.86, c.main, 0, 0.06, 0);
+            box(g, 1.88, 0.5, 0.2, c.main, 0, 0.36, -0.325);
+            box(g, 0.18, 0.26, 0.86, c.main, -0.86, 0.46, 0);
+            box(g, 0.18, 0.26, 0.86, c.main, 0.86, 0.46, 0);
+            box(g, 0.74, 0.1, 0.6, c.cushion, -0.38, 0.46, 0.08);
+            box(g, 0.74, 0.1, 0.6, c.cushion, 0.38, 0.46, 0.08);
+            for (const x of [-0.85, 0.85]) for (const z of [-0.36, 0.36]) box(g, 0.06, 0.06, 0.06, c.legs, x, 0, z);
         },
     },
     chair: {
-        name: 'いす', icon: '🪑', color: '#b98b5e', size: [1, 1], tags: ['座る', 'ダイニング', 'ナチュラル', '木'],
+        name: 'いす', icon: '🪑', size: [1, 1], tags: ['座る', 'ダイニング', 'ナチュラル', '木'],
+        slots: [['main', '木', '#b98b5e'], ['seat', '座面', '#b98b5e']],
         build(g, c) {
-            for (const x of [-0.17, 0.17]) for (const z of [-0.17, 0.17]) box(g, 0.04, 0.42, 0.04, c, x, 0, z);
-            box(g, 0.42, 0.05, 0.42, c, 0, 0.42, 0);
-            box(g, 0.04, 0.45, 0.04, c, -0.17, 0.47, -0.19);
-            box(g, 0.04, 0.45, 0.04, c, 0.17, 0.47, -0.19);
-            box(g, 0.42, 0.16, 0.04, c, 0, 0.74, -0.19);
+            for (const x of [-0.17, 0.17]) for (const z of [-0.17, 0.17]) box(g, 0.04, 0.42, 0.04, c.main, x, 0, z);
+            box(g, 0.42, 0.05, 0.42, c.seat, 0, 0.42, 0);
+            box(g, 0.04, 0.45, 0.04, c.main, -0.17, 0.47, -0.19);
+            box(g, 0.04, 0.45, 0.04, c.main, 0.17, 0.47, -0.19);
+            box(g, 0.42, 0.16, 0.03, c.main, 0, 0.74, -0.19);
         },
     },
     table: {
-        name: 'テーブル', icon: '🍽', color: '#c89a6a', size: [3, 2], tags: ['テーブル', 'ダイニング', 'ナチュラル', '木'],
+        name: 'テーブル', icon: '🍽', size: [3, 2], tags: ['テーブル', 'ダイニング', 'ナチュラル', '木'],
+        slots: [['main', '天板', '#c89a6a'], ['legs', '脚', '#a07a50']],
         build(g, c) {
-            box(g, 1.4, 0.05, 0.9, c, 0, 0.68, 0);
-            for (const x of [-0.62, 0.62]) for (const z of [-0.37, 0.37]) box(g, 0.06, 0.68, 0.06, shade(c, -0.15), x, 0, z);
+            box(g, 1.4, 0.05, 0.9, c.main, 0, 0.68, 0);
+            for (const x of [-0.62, 0.62]) for (const z of [-0.37, 0.37]) box(g, 0.06, 0.68, 0.06, c.legs, x, 0, z);
         },
     },
     lowtable: {
-        name: 'ローテーブル', icon: '☕', color: '#e8e1d5', size: [2, 2], tags: ['テーブル', 'リビング', 'シンプル'],
+        name: 'ローテーブル', icon: '☕', size: [2, 2], tags: ['テーブル', 'リビング', 'シンプル'],
+        slots: [['main', '天板', '#e8e1d5'], ['base', '脚', '#6b5847']],
         build(g, c) {
-            cyl(g, 0.42, 0.42, 0.04, c, 0, 0.34, 0, 32);
-            cyl(g, 0.05, 0.05, 0.34, '#6b5847', 0, 0, 0, 12);
-            cyl(g, 0.22, 0.22, 0.02, '#6b5847', 0, 0, 0, 24);
+            cyl(g, 0.42, 0.42, 0.04, c.main, 0, 0.34, 0, 32);
+            cyl(g, 0.05, 0.05, 0.335, c.base, 0, 0.005, 0, 12);
+            cyl(g, 0.22, 0.22, 0.02, c.base, 0, 0, 0, 24);
         },
     },
     bookshelf: {
-        name: '本棚', icon: '📚', color: '#9c7350', size: [2, 1], tags: ['収納', '書斎', 'ナチュラル', '木'],
+        name: '本棚', icon: '📚', size: [2, 1], tags: ['収納', '書斎', 'ナチュラル', '木'],
+        slots: [['main', '本棚', '#9c7350'], ['back', '背板', '#7c5a3e']],
         build(g, c) {
             const W = 0.94, D = 0.4, H = 1.8, z = -0.04;
-            box(g, 0.03, H, D, c, -W / 2 + 0.015, 0, z);
-            box(g, 0.03, H, D, c, W / 2 - 0.015, 0, z);
-            box(g, W, 0.03, D, c, 0, H - 0.03, z);
-            box(g, W, 0.02, 0.02, c, 0, 0, z - D / 2 + 0.01);
-            box(g, W - 0.06, H, 0.02, shade(c, -0.12), 0, 0, z - D / 2 + 0.01);
+            box(g, 0.03, H, D, c.main, -W / 2 + 0.015, 0, z);
+            box(g, 0.03, H, D, c.main, W / 2 - 0.015, 0, z);
+            box(g, W + 0.01, 0.03, D + 0.01, c.main, 0, H, z);
+            box(g, W - 0.064, H - 0.01, 0.02, c.back, 0, 0.005, z - D / 2 + 0.012);
             const bookColors = ['#c45c4a', '#4a7cc4', '#e3b34c', '#5d9c6a', '#8a6bb8', '#e8e1d5'];
             let k = 0;
             for (let i = 0; i < 4; i++) {
                 const y = i * 0.44;
-                box(g, W - 0.06, 0.03, D, c, 0, y, z);
+                box(g, W - 0.062, 0.03, D - 0.004, c.main, 0, y, z + 0.002);
                 let x = -W / 2 + 0.06;
                 while (x < W / 2 - 0.12) {
                     const bw = 0.04 + ((k * 7) % 5) * 0.012, bh = 0.24 + ((k * 3) % 4) * 0.03;
@@ -86,53 +93,63 @@ const FURNITURE = {
         },
     },
     wardrobe: {
-        name: 'クローゼット', icon: '🚪', color: '#e5dccd', size: [2, 1], tags: ['収納', '寝室', 'シンプル'],
+        name: 'クローゼット', icon: '🚪', size: [2, 1], tags: ['収納', '寝室', 'シンプル'],
+        slots: [['main', '本体', '#e5dccd'], ['handle', '取っ手', '#8a7a66'], ['plinth', '台座', '#bfae93']],
         build(g, c) {
-            box(g, 0.94, 1.9, 0.46, c, 0, 0, -0.01);
-            box(g, 0.005, 1.7, 0.01, shade(c, -0.25), 0, 0.12, 0.225);
-            box(g, 0.02, 0.18, 0.03, '#8a7a66', -0.05, 0.95, 0.23);
-            box(g, 0.02, 0.18, 0.03, '#8a7a66', 0.05, 0.95, 0.23);
-            box(g, 0.94, 0.08, 0.46, shade(c, -0.2), 0, 0, -0.01);
+            box(g, 0.9, 0.08, 0.42, c.plinth, 0, 0, -0.02);           // 台座は本体より少し内側
+            box(g, 0.94, 1.82, 0.46, c.main, 0, 0.08, -0.01);         // 本体は台座の上に載せる
+            box(g, 0.006, 1.66, 0.006, shade(c.main, -0.25), 0, 0.16, 0.223);
+            box(g, 0.02, 0.18, 0.03, c.handle, -0.05, 0.95, 0.235);
+            box(g, 0.02, 0.18, 0.03, c.handle, 0.05, 0.95, 0.235);
         },
     },
     tvstand: {
-        name: 'テレビ台', icon: '📺', color: '#6f5a48', size: [3, 1], tags: ['収納', '家電', 'リビング', 'シンプル'],
+        name: 'テレビ台', icon: '📺', size: [3, 1], tags: ['収納', '家電', 'リビング', 'シンプル'],
+        slots: [['main', '台', '#6f5a48'], ['tv', 'テレビ', '#2b2b2e']],
         build(g, c) {
-            box(g, 1.4, 0.42, 0.42, c, 0, 0, 0);
-            box(g, 0.6, 0.01, 0.3, shade(c, -0.2), -0.3, 0.2, 0.2);
-            box(g, 0.3, 0.03, 0.18, '#2b2b2e', 0, 0.42, -0.04);
-            box(g, 0.05, 0.12, 0.04, '#2b2b2e', 0, 0.45, -0.04);
-            box(g, 1.1, 0.64, 0.04, '#2b2b2e', 0, 0.55, -0.04);
+            box(g, 1.4, 0.42, 0.42, c.main, 0, 0, 0);
+            box(g, 0.6, 0.006, 0.006, shade(c.main, -0.2), -0.3, 0.2, 0.213);
+            box(g, 0.3, 0.03, 0.18, c.tv, 0, 0.42, -0.04);
+            box(g, 0.05, 0.12, 0.03, c.tv, 0, 0.45, -0.04);
+            box(g, 1.1, 0.64, 0.04, c.tv, 0, 0.55, -0.04);
             box(g, 1.04, 0.58, 0.005, '#16181d', 0, 0.58, -0.017);
         },
     },
     plant: {
-        name: '観葉植物', icon: '🪴', color: '#5f9e5a', size: [1, 1], tags: ['植物', 'ナチュラル', '小物'],
+        name: '観葉植物', icon: '🪴', size: [1, 1], tags: ['植物', 'ナチュラル', '小物'],
+        slots: [['main', '葉', '#5f9e5a'], ['pot', '鉢', '#c47a52']],
         build(g, c) {
-            cyl(g, 0.15, 0.11, 0.3, '#c47a52', 0, 0, 0, 16);
-            ball(g, 0.2, c, 0, 0.55, 0);
-            ball(g, 0.15, shade(c, 0.1), 0.1, 0.72, 0.05);
-            ball(g, 0.13, shade(c, -0.1), -0.1, 0.68, -0.06);
+            cyl(g, 0.15, 0.11, 0.3, c.pot, 0, 0, 0, 16);
+            ball(g, 0.2, c.main, 0, 0.55, 0);
+            ball(g, 0.15, shade(c.main, 0.1), 0.1, 0.72, 0.05);
+            ball(g, 0.13, shade(c.main, -0.1), -0.1, 0.68, -0.06);
         },
     },
     lamp: {
-        name: 'スタンドライト', icon: '💡', color: '#f3e3b8', size: [1, 1], tags: ['照明', 'リビング', 'シンプル'],
+        name: 'スタンドライト', icon: '💡', size: [1, 1], tags: ['照明', 'リビング', 'シンプル'],
+        slots: [['main', 'かさ', '#f3e3b8'], ['pole', '柱と台', '#3a3633']],
         build(g, c) {
-            cyl(g, 0.13, 0.13, 0.03, '#3a3633', 0, 0, 0, 20);
-            cyl(g, 0.015, 0.015, 1.35, '#3a3633', 0, 0.03, 0, 8);
-            const shadeMesh = cyl(g, 0.11, 0.18, 0.24, c, 0, 1.3, 0, 24);
-            shadeMesh.material.emissive = new THREE.Color(c);
+            cyl(g, 0.13, 0.13, 0.03, c.pole, 0, 0, 0, 20);
+            cyl(g, 0.015, 0.015, 1.35, c.pole, 0, 0.03, 0, 8);
+            const shadeMesh = cyl(g, 0.11, 0.18, 0.24, c.main, 0, 1.3, 0, 24);
+            shadeMesh.material.emissive = new THREE.Color(c.main);
             shadeMesh.material.emissiveIntensity = 0.35;
         },
     },
     rug: {
-        name: 'ラグ', icon: '🟫', color: '#c98c6b', size: [4, 3], tags: ['敷物', 'リビング', '布'], flat: true,
+        name: 'ラグ', icon: '🟫', size: [4, 3], tags: ['敷物', 'リビング', '布'], flat: true,
+        slots: [['main', '外側', '#c98c6b'], ['inner', '内側', '#d9a88d']],
         build(g, c) {
-            box(g, 1.9, 0.012, 1.4, c, 0, 0, 0);
-            box(g, 1.6, 0.014, 1.1, shade(c, 0.15), 0, 0, 0);
+            box(g, 1.9, 0.012, 1.4, c.main, 0, 0, 0);
+            box(g, 1.6, 0.014, 1.1, c.inner, 0, 0, 0);
         },
     },
 };
+// 部位を { key, name, color } の形にし、見本の色（最初の部位）を color に置く
+for (const def of Object.values(FURNITURE)) {
+    def.slots = def.slots.map(([key, name, color]) => ({ key, name, color }));
+    def.color = def.slots[0].color;
+}
 
 // ---------- 形を作る小さな関数 ----------
 const materialCache = new Map();
@@ -170,19 +187,35 @@ function shade(hex, amount) {
 }
 
 // ---------- 状態とセーブ ----------
+// 床と壁の柄。color: 柄の元の色（ユーザーが色を決めていないときに使う）
+const FLOOR_PATTERNS = {
+    wood: { name: 'フローリング', color: '#c89a6a' },
+    tile: { name: 'タイル', color: '#e6e1d8' },
+    carpet: { name: 'カーペット', color: '#9fa9b5' },
+    tatami: { name: '畳', color: '#c7c08a' },
+};
+const WALL_PATTERNS = {
+    plain: { name: '無地', color: '#f1ece3' },
+    stripe: { name: 'ストライプ', color: '#e9e0cf' },
+    brick: { name: 'レンガ', color: '#b9765a' },
+    wainscot: { name: '腰壁', color: '#f1ece3' },
+};
+
 function makeDefaultGame() {
     return {
         saveVersion: SAVE_VERSION,
         appearance: 'auto',
         nextUid: 5,
         items: [
-            { uid: 1, type: 'rug', gx: 4, gz: 5, rot: 0, color: null },
-            { uid: 2, type: 'bed', gx: 1, gz: 0, rot: 0, color: null },
-            { uid: 3, type: 'plant', gx: 11, gz: 0, rot: 0, color: null },
-            { uid: 4, type: 'sofa', gx: 4, gz: 9, rot: 2, color: null },
+            { uid: 1, type: 'rug', gx: 4, gz: 5, rot: 0, colors: {} },
+            { uid: 2, type: 'bed', gx: 1, gz: 0, rot: 0, colors: {} },
+            { uid: 3, type: 'plant', gx: 11, gz: 0, rot: 0, colors: {} },
+            { uid: 4, type: 'sofa', gx: 4, gz: 9, rot: 2, colors: {} },
         ],
+        floor: { pattern: 'wood', color: null }, // color: null は柄の元の色
+        wall: { pattern: 'plain', color: null },
         recentColors: [],
-        presets: [], // { id, name, savedAt, items }
+        presets: [], // { id, name, savedAt, items, floor, wall }
         nextPresetId: 1,
     };
 }
@@ -192,6 +225,17 @@ const MAX_PRESETS = 30;
 function normHex(v) {
     return typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : null;
 }
+// 部位ごとの色。決めた色だけを持つ（決めていない部位は元の色）
+function sanitizeColors(type, colors, oldColor) {
+    const out = {};
+    const keys = FURNITURE[type].slots.map(s => s.key);
+    if (colors && typeof colors === 'object') {
+        for (const k of keys) { const h = normHex(colors[k]); if (h) out[k] = h; }
+    }
+    const old = normHex(oldColor); // v0.2.0 までは 1 色だけ（color）だった
+    if (old && !out[keys[0]]) out[keys[0]] = old;
+    return out;
+}
 // 家具の一覧の形をそろえる。重複・知らない家具を除き、部屋からはみ出すものは中に入れる
 function sanitizeItems(list) {
     if (!Array.isArray(list)) return [];
@@ -199,12 +243,27 @@ function sanitizeItems(list) {
     return list
         .filter(it => it && FURNITURE[it.type] && Number.isInteger(it.uid) && !seen.has(it.uid) && seen.add(it.uid))
         .map(it => {
-            const item = { uid: it.uid, type: it.type, gx: toInt(it.gx), gz: toInt(it.gz), rot: ((toInt(it.rot) % 4) + 4) % 4, color: normHex(it.color) };
+            const item = { uid: it.uid, type: it.type, gx: toInt(it.gx), gz: toInt(it.gz), rot: ((toInt(it.rot) % 4) + 4) % 4, colors: sanitizeColors(it.type, it.colors, it.color) };
             clampItem(item);
             return item;
         });
 }
-function itemColor(item) { return item.color || FURNITURE[item.type].color; }
+function sanitizeSurface(v, patterns, fallback) {
+    const pattern = v && patterns[v.pattern] ? v.pattern : fallback;
+    return { pattern, color: normHex(v && v.color) };
+}
+function slotColor(item, key) {
+    return item.colors[key] || FURNITURE[item.type].slots.find(s => s.key === key).color;
+}
+function colorsFor(item) {
+    const c = {};
+    for (const s of FURNITURE[item.type].slots) c[s.key] = item.colors[s.key] || s.color;
+    return c;
+}
+function surfaceColor(kind) {
+    const v = game[kind];
+    return v.color || (kind === 'floor' ? FLOOR_PATTERNS : WALL_PATTERNS)[v.pattern].color;
+}
 
 let game = makeDefaultGame();
 let resetting = false;
@@ -212,6 +271,7 @@ let resetting = false;
 function saveGame() {
     if (resetting) return;
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(game)); } catch (err) { console.error(err); }
+    recordHistory();
 }
 
 function loadGame() {
@@ -232,12 +292,19 @@ function loadGame() {
     if (Array.isArray(p.items)) game.items = sanitizeItems(p.items);
     const maxUid = game.items.reduce((m, it) => Math.max(m, it.uid), 0);
     game.nextUid = Math.max(toInt(p.nextUid), maxUid + 1);
+    game.floor = sanitizeSurface(p.floor, FLOOR_PATTERNS, 'wood');
+    game.wall = sanitizeSurface(p.wall, WALL_PATTERNS, 'plain');
     if (Array.isArray(p.recentColors)) game.recentColors = [...new Set(p.recentColors.map(normHex).filter(Boolean))].slice(0, MAX_RECENT);
     if (Array.isArray(p.presets)) {
         const ids = new Set();
         game.presets = p.presets
             .filter(ps => ps && Number.isInteger(ps.id) && !ids.has(ps.id) && ids.add(ps.id))
-            .map(ps => ({ id: ps.id, name: String(ps.name || 'プリセット').slice(0, 30), savedAt: Number(ps.savedAt) || 0, items: sanitizeItems(ps.items) }))
+            .map(ps => ({
+                id: ps.id, name: String(ps.name || 'プリセット').slice(0, 30), savedAt: Number(ps.savedAt) || 0,
+                items: sanitizeItems(ps.items),
+                floor: sanitizeSurface(ps.floor, FLOOR_PATTERNS, 'wood'),
+                wall: sanitizeSurface(ps.wall, WALL_PATTERNS, 'plain'),
+            }))
             .slice(0, MAX_PRESETS);
     }
     const maxPreset = game.presets.reduce((m, ps) => Math.max(m, ps.id), 0);
@@ -307,34 +374,147 @@ sun.shadow.bias = -0.0005;
 sun.shadow.normalBias = 0.02;
 scene.add(sun);
 
-// 床
-const floorTex = makeFloorTexture();
-const floor = new THREE.Mesh(
-    new THREE.BoxGeometry(N * CELL, 0.1, N * CELL),
-    new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 })
-);
+// 床（柄は canvas に描いて貼る）
+const floorMat = new THREE.MeshStandardMaterial({ roughness: 0.9 });
+const floor = new THREE.Mesh(new THREE.BoxGeometry(N * CELL, 0.1, N * CELL), floorMat);
 floor.position.y = -0.05;
 floor.receiveShadow = true;
 scene.add(floor);
 
-function makeFloorTexture() {
-    const size = 512, cv = document.createElement('canvas');
-    cv.width = cv.height = size;
-    const ctx = cv.getContext('2d');
-    const boards = 12;
-    for (let i = 0; i < boards; i++) {
-        const l = 62 + ((i * 37) % 7) - 3;
-        ctx.fillStyle = `hsl(30 38% ${l}%)`;
-        ctx.fillRect(0, i * size / boards, size, size / boards);
-        ctx.fillStyle = 'rgba(80,50,30,.25)';
-        ctx.fillRect(0, i * size / boards, size, 2);
-        const cut = ((i * 211) % size);
-        ctx.fillRect(cut, i * size / boards, 2, size / boards);
-    }
+// 色を明るく・暗くする（dl は明るさの % の差）
+function tone(hex, dl) {
+    const [h, s, l] = hexToHslFloat(hex);
+    return hslToHex(h, s, Math.min(100, Math.max(0, l + dl)));
+}
+// 決まった乱数（毎回同じ柄になるように）
+function seeded(seed) {
+    let x = seed >>> 0 || 1;
+    return () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+}
+function canvasTexture(cv) {
     const tex = new THREE.CanvasTexture(cv);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     return tex;
+}
+
+// 床の柄。canvas の 1 辺 = 部屋の 1 辺（6m）
+function drawFloor(pattern, color) {
+    const size = 1024, cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    const ctx = cv.getContext('2d');
+    const rnd = seeded(7);
+    const px = size / (N * CELL); // 1m あたりのピクセル
+    if (pattern === 'wood') {
+        const boards = 24; // 幅 25cm の板
+        const bh = size / boards;
+        for (let i = 0; i < boards; i++) {
+            let x = -rnd() * size * 0.5;
+            while (x < size) {
+                const len = px * (1.2 + rnd() * 0.8);
+                ctx.fillStyle = tone(color, (rnd() - 0.5) * 8);
+                ctx.fillRect(x, i * bh, len, bh);
+                ctx.fillStyle = tone(color, -22);
+                ctx.fillRect(x, i * bh, 2, bh);
+                x += len;
+            }
+            ctx.fillStyle = tone(color, -22);
+            ctx.fillRect(0, i * bh, size, 2);
+        }
+    } else if (pattern === 'tile') {
+        const n = N; // 50cm のタイル
+        const t = size / n;
+        ctx.fillStyle = tone(color, -18);
+        ctx.fillRect(0, 0, size, size);
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+            ctx.fillStyle = tone(color, (rnd() - 0.5) * 4);
+            ctx.fillRect(i * t + 2, j * t + 2, t - 4, t - 4);
+        }
+    } else if (pattern === 'carpet') {
+        ctx.fillStyle = color;
+        ctx.fillRect(0, 0, size, size);
+        for (let k = 0; k < 26000; k++) {
+            ctx.fillStyle = tone(color, (rnd() - 0.5) * 14);
+            ctx.fillRect(rnd() * size, rnd() * size, 2, 2);
+        }
+    } else if (pattern === 'tatami') {
+        // 1.5m 四方のかたまりに 2 枚ずつ。かたまりごとに向きを変える
+        const blk = size / 4;
+        const edge = tone(color, -45);
+        const drawMat = (x, y, w, h, vertical) => {
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, w, h);
+            ctx.fillStyle = tone(color, -6);
+            if (vertical) for (let yy = y; yy < y + h; yy += 4) ctx.fillRect(x, yy, w, 1);
+            else for (let xx = x; xx < x + w; xx += 4) ctx.fillRect(xx, y, 1, h);
+            ctx.fillStyle = edge; // 縁（へり）
+            if (vertical) { ctx.fillRect(x, y, 5, h); ctx.fillRect(x + w - 5, y, 5, h); }
+            else { ctx.fillRect(x, y, w, 5); ctx.fillRect(x, y + h - 5, w, 5); }
+            ctx.fillStyle = tone(color, -25);
+            ctx.strokeStyle = tone(color, -25);
+            ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+        };
+        for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+            const x = i * blk, y = j * blk;
+            if ((i + j) % 2) { drawMat(x, y, blk, blk / 2, false); drawMat(x, y + blk / 2, blk, blk / 2, false); }
+            else { drawMat(x, y, blk / 2, blk, true); drawMat(x + blk / 2, y, blk / 2, blk, true); }
+        }
+    }
+    return canvasTexture(cv);
+}
+
+// 壁の柄。横 = 6m、縦 = 2.6m
+function drawWall(pattern, color) {
+    const w = 1024, h = Math.round(1024 * WALL_H / (N * CELL));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext('2d');
+    const rnd = seeded(11);
+    const px = w / (N * CELL);
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, w, h);
+    if (pattern === 'plain') {
+        for (let k = 0; k < 6000; k++) {
+            ctx.fillStyle = tone(color, (rnd() - 0.5) * 3);
+            ctx.fillRect(rnd() * w, rnd() * h, 2, 2);
+        }
+    } else if (pattern === 'stripe') {
+        const sw = px * 0.12;
+        ctx.fillStyle = tone(color, -7);
+        for (let x = 0; x < w; x += sw * 3) ctx.fillRect(x, 0, sw, h);
+    } else if (pattern === 'brick') {
+        const bw = px * 0.24, bh = px * 0.075, gap = 2;
+        ctx.fillStyle = tone(color, 25);
+        ctx.fillRect(0, 0, w, h);
+        for (let row = 0, y = h; y > -bh; row++, y -= bh) {
+            for (let x = row % 2 ? -bw / 2 : 0; x < w; x += bw) {
+                ctx.fillStyle = tone(color, (rnd() - 0.5) * 12);
+                ctx.fillRect(x + gap / 2, y - bh + gap / 2, bw - gap, bh - gap);
+            }
+        }
+    } else if (pattern === 'wainscot') {
+        const ph = px * 0.9; // 床から 90cm の腰板
+        const panel = tone(color, -10);
+        ctx.fillStyle = panel;
+        ctx.fillRect(0, h - ph, w, ph);
+        ctx.fillStyle = tone(color, -22);
+        for (let x = 0; x < w; x += px * 0.6) ctx.fillRect(x, h - ph, 2, ph);
+        ctx.fillStyle = tone(color, 4);
+        ctx.fillRect(0, h - ph - 6, w, 6);
+        ctx.fillStyle = tone(color, -25);
+        ctx.fillRect(0, h - ph, w, 2);
+    }
+    return canvasTexture(cv);
+}
+
+function applySurfaces() {
+    if (floorMat.map) floorMat.map.dispose();
+    floorMat.map = drawFloor(game.floor.pattern, surfaceColor('floor'));
+    floorMat.needsUpdate = true;
+    if (wallMat.map) wallMat.map.dispose();
+    wallMat.map = drawWall(game.wall.pattern, surfaceColor('wall'));
+    wallMat.needsUpdate = true;
+    requestRender();
 }
 
 // マス目（家具を選んでいる間だけ見せる）
@@ -346,7 +526,7 @@ grid.visible = false;
 scene.add(grid);
 
 // 壁: カメラ側の壁は隠す
-const wallMat = new THREE.MeshStandardMaterial({ color: '#f1ece3', roughness: 0.95 });
+const wallMat = new THREE.MeshStandardMaterial({ roughness: 0.95 });
 const walls = [
     { normal: new THREE.Vector3(0, 0, -1), pos: [0, WALL_H / 2, -HALF - WALL_T / 2], size: [N * CELL + WALL_T * 2, WALL_H, WALL_T] },
     { normal: new THREE.Vector3(0, 0, 1), pos: [0, WALL_H / 2, HALF + WALL_T / 2], size: [N * CELL + WALL_T * 2, WALL_H, WALL_T] },
@@ -379,7 +559,7 @@ const objects = new Map(); // uid → Group
 function buildObject(item) {
     const def = FURNITURE[item.type];
     const g = new THREE.Group();
-    def.build(g, itemColor(item));
+    def.build(g, colorsFor(item));
     g.userData.uid = item.uid;
     furnitureRoot.add(g);
     objects.set(item.uid, g);
@@ -491,7 +671,7 @@ function updateMarker() {
 }
 
 function addItem(type) {
-    const item = { uid: game.nextUid++, type, gx: 0, gz: 0, rot: 0, color: null };
+    const item = { uid: game.nextUid++, type, gx: 0, gz: 0, rot: 0, colors: {} };
     Object.assign(item, findFreeSpot(item));
     game.items.push(item);
     buildObject(item);
@@ -518,7 +698,7 @@ function removeSelected() {
     game.items = game.items.filter(it => it.uid !== item.uid);
     removeObject(item.uid);
     select(null);
-    toast(`${FURNITURE[item.type].name}をしまいました`);
+    toast(`${FURNITURE[item.type].name}をしまいました（↶ で戻せます）`);
     saveGame();
 }
 
@@ -817,8 +997,40 @@ function hslOf(hex) {
     return best || [H % 360, S, Lr];
 }
 
+// 色を変える対象: { kind: 'item', uid, slot } / { kind: 'floor' } / { kind: 'wall' }
+function targetGet(t) {
+    if (t.kind === 'item') { const it = findItem(t.uid); return it ? it.colors[t.slot] || null : null; }
+    return game[t.kind].color;
+}
+function targetDefault(t) {
+    if (t.kind === 'item') { const it = findItem(t.uid); return FURNITURE[it.type].slots.find(s => s.key === t.slot).color; }
+    return (t.kind === 'floor' ? FLOOR_PATTERNS : WALL_PATTERNS)[game[t.kind].pattern].color;
+}
+function targetShown(t) { return targetGet(t) || targetDefault(t); }
+function targetSnapshot(t) {
+    if (t.kind === 'item') return JSON.stringify(findItem(t.uid).colors);
+    return JSON.stringify(game[t.kind].color);
+}
+let surfaceQueued = false;
+function targetSet(t, hex, commit) {
+    if (t.kind === 'item') {
+        const it = findItem(t.uid);
+        if (!it) return;
+        if (hex) it.colors[t.slot] = hex; else delete it.colors[t.slot];
+        rebuildObject(it);
+    } else {
+        game[t.kind].color = hex;
+        // 柄を描き直すのは重いので、1 フレームに 1 回にまとめる
+        if (!surfaceQueued) {
+            surfaceQueued = true;
+            requestAnimationFrame(() => { surfaceQueued = false; applySurfaces(); renderSurfacePanel(); });
+        }
+    }
+    if (commit) saveGame();
+}
+
 const colorDialog = document.getElementById('color-dialog');
-const cd = { uid: null, openColor: null, hsl: [0, 0, 0] };
+const cd = { target: null, snapshot: null, openColors: null, hsl: [0, 0, 0] };
 const HSL_KEYS = [
     { key: 'h', name: '色合い', max: 359, unit: '°', wrap: true },
     { key: 's', name: '鮮やかさ', max: 100, unit: '%' },
@@ -829,20 +1041,57 @@ function swatchButton(hex, label, current) {
     const b = document.createElement('button');
     b.className = 'cswatch';
     b.style.setProperty('--c', hex);
+    b.dataset.hex = hex;
     b.title = label || hex;
     b.setAttribute('aria-label', label || hex);
     b.setAttribute('aria-pressed', String(current === hex));
-    b.addEventListener('click', () => { setItemColor(hex, true); renderColorDialog(); });
+    b.addEventListener('click', () => { targetSet(cd.target, hex, true); renderColorDialog(); });
     return b;
 }
+// 部屋の中で使われている色（色を変えている対象そのものは除く）
+function usedColors() {
+    const t = cd.target, list = [], seen = new Set();
+    const push = (hex, label) => { if (!seen.has(hex)) { seen.add(hex); list.push([hex, label]); } };
+    for (const it of game.items) {
+        const def = FURNITURE[it.type];
+        for (const s of def.slots) {
+            if (t.kind === 'item' && t.uid === it.uid && t.slot === s.key) continue;
+            push(slotColor(it, s.key), def.slots.length > 1 ? `${def.name}（${s.name}）` : def.name);
+        }
+    }
+    if (t.kind !== 'floor') push(surfaceColor('floor'), '床');
+    if (t.kind !== 'wall') push(surfaceColor('wall'), '壁');
+    return list.slice(0, 8);
+}
 function renderColorDialog() {
-    const item = findItem(cd.uid);
-    if (!item) return;
-    const def = FURNITURE[item.type];
-    const cur = item.color; // null は元の色（自動）
-    const shown = itemColor(item);
+    const t = cd.target;
+    if (!t) return;
+    const cur = targetGet(t); // null は元の色
+    const shown = targetShown(t);
+    let title = t.kind === 'floor' ? '床の色' : t.kind === 'wall' ? '壁の色' : '';
+    const partsWrap = colorDialog.querySelector('.cd-parts');
+    partsWrap.innerHTML = '';
+    if (t.kind === 'item') {
+        const it = findItem(t.uid);
+        const def = FURNITURE[it.type];
+        title = `${def.name}の色`;
+        // 部位のタブ
+        if (def.slots.length > 1) {
+            for (const s of def.slots) {
+                const b = document.createElement('button');
+                b.className = 'cd-part';
+                b.setAttribute('aria-pressed', String(s.key === t.slot));
+                b.innerHTML = '<span class="dot"></span><span></span>';
+                b.querySelector('.dot').style.background = slotColor(it, s.key);
+                b.lastChild.textContent = s.name;
+                b.addEventListener('click', () => { cd.target = { ...t, slot: s.key }; renderColorDialog(); });
+                partsWrap.appendChild(b);
+            }
+        }
+    }
+    partsWrap.hidden = !partsWrap.children.length;
     colorDialog.querySelector('.cd-preview').style.background = shown;
-    colorDialog.querySelector('.cd-title').textContent = `${def.name}の色`;
+    colorDialog.querySelector('.cd-title').textContent = title;
     colorDialog.querySelector('.cd-hex').textContent = cur ? shown : `${shown}（元の色）`;
 
     const recentWrap = colorDialog.querySelector('.cd-recent');
@@ -852,21 +1101,17 @@ function renderColorDialog() {
 
     const sameWrap = colorDialog.querySelector('.cd-same');
     sameWrap.innerHTML = '';
-    const seen = new Set();
-    for (const it of game.items) {
-        if (it.uid === item.uid) continue;
-        const c = itemColor(it);
-        if (seen.has(c)) continue;
-        seen.add(c);
+    const used = usedColors();
+    for (const [hex, label] of used) {
         const row = document.createElement('div');
         row.className = 'cd-same-item';
-        row.appendChild(swatchButton(c, FURNITURE[it.type].name, cur));
+        row.appendChild(swatchButton(hex, label, cur));
         const name = document.createElement('span');
-        name.textContent = FURNITURE[it.type].name;
+        name.textContent = label;
         row.appendChild(name);
         sameWrap.appendChild(row);
     }
-    colorDialog.querySelector('.cd-same-sec').hidden = !seen.size;
+    colorDialog.querySelector('.cd-same-sec').hidden = !used.length;
 
     const palWrap = colorDialog.querySelector('.cd-palette');
     palWrap.innerHTML = '';
@@ -874,9 +1119,12 @@ function renderColorDialog() {
 
     colorDialog.querySelector('.cd-picker').value = shown;
     colorDialog.querySelector('.cd-auto').disabled = cur === null;
-    colorDialog.querySelector('.cd-revert').disabled = cur === cd.openColor;
+    updateRevertButton();
     cd.hsl = hslOf(shown);
     renderSliders();
+}
+function updateRevertButton() {
+    colorDialog.querySelector('.cd-revert').disabled = targetSnapshot(cd.target) === cd.snapshot;
 }
 function renderSliders() {
     const [h, s, l] = cd.hsl;
@@ -896,14 +1144,7 @@ function renderSliders() {
         if (document.activeElement !== num) num.value = cd.hsl[i];
     });
 }
-function setItemColor(hex, commit) {
-    const item = findItem(cd.uid);
-    if (!item) return;
-    item.color = hex;
-    rebuildObject(item);
-    if (commit) saveGame();
-}
-// スライダー・数値・− / ＋ から色を変える
+// スライダー・数値・− / ＋ から色を変える（ダイアログは作り直さず、変わる所だけ直す）
 function setHsl(i, value, commit) {
     const k = HSL_KEYS[i];
     if (k.wrap) value = ((value % 360) + 360) % 360;
@@ -912,28 +1153,38 @@ function setHsl(i, value, commit) {
     cd.hsl[i] = value;
     const hex = hslToHex(...cd.hsl);
     hslMemo.set(hex, [...cd.hsl]);
-    setItemColor(hex, commit);
-    const item = findItem(cd.uid);
+    targetSet(cd.target, hex, commit);
     colorDialog.querySelector('.cd-preview').style.background = hex;
     colorDialog.querySelector('.cd-hex').textContent = hex;
     colorDialog.querySelector('.cd-auto').disabled = false;
-    colorDialog.querySelector('.cd-revert').disabled = item.color === cd.openColor;
-    colorDialog.querySelectorAll('.cswatch').forEach(b => b.setAttribute('aria-pressed', String(b.style.getPropertyValue('--c') === hex)));
+    updateRevertButton();
+    colorDialog.querySelectorAll('.cswatch').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.hex === hex)));
+    const dot = colorDialog.querySelector('.cd-part[aria-pressed="true"] .dot');
+    if (dot) dot.style.background = hex;
     renderSliders();
 }
 function addRecentColor(hex) {
     if (!hex) return;
     game.recentColors = [hex, ...game.recentColors.filter(c => c !== hex)].slice(0, MAX_RECENT);
 }
-function openColorDialog() {
-    const item = findItem(selectedUid);
-    if (!item) return;
-    cd.uid = item.uid;
-    cd.openColor = item.color;
+// 開いたときの色（部位ごと）。閉じたときに、変わった色を「最近使った色」に足すのに使う
+function currentColorList(t) {
+    if (t.kind === 'item') { const it = findItem(t.uid); return FURNITURE[it.type].slots.map(s => it.colors[s.key] || null); }
+    return [game[t.kind].color];
+}
+function openColorDialog(target) {
+    if (!target) {
+        const item = findItem(selectedUid);
+        if (!item) return;
+        target = { kind: 'item', uid: item.uid, slot: FURNITURE[item.type].slots[0].key };
+    }
+    cd.target = target;
+    cd.snapshot = targetSnapshot(target);
+    cd.openColors = currentColorList(target);
     renderColorDialog();
     if (colorDialog.showModal) {
         colorDialog.showModal();
-        focusOn(item, colorDialog);
+        if (target.kind === 'item') focusOn(findItem(target.uid), colorDialog);
     } else colorDialog.querySelector('.cd-picker').click();
 }
 // 下から出る画面で隠れないよう、家具を画面の上側の真ん中に映す
@@ -956,26 +1207,38 @@ function unfocus() {
 }
 colorDialog.addEventListener('close', () => {
     unfocus();
-    const item = findItem(cd.uid);
-    if (item && item.color !== cd.openColor) addRecentColor(item.color);
+    const t = cd.target;
+    if (t && (t.kind !== 'item' || findItem(t.uid))) {
+        const now = currentColorList(t);
+        now.forEach((c, i) => { if (c && c !== cd.openColors[i]) addRecentColor(c); });
+    }
     saveGame();
-    cd.uid = null;
+    cd.target = null;
 });
 colorDialog.addEventListener('click', (e) => { if (e.target === colorDialog) colorDialog.close(); });
 colorDialog.querySelector('.cd-close').addEventListener('click', () => colorDialog.close());
-colorDialog.querySelector('.cd-auto').addEventListener('click', () => { setItemColor(null, true); renderColorDialog(); });
-colorDialog.querySelector('.cd-revert').addEventListener('click', () => { setItemColor(cd.openColor, true); renderColorDialog(); });
+colorDialog.querySelector('.cd-auto').addEventListener('click', () => { targetSet(cd.target, null, true); renderColorDialog(); });
+colorDialog.querySelector('.cd-revert').addEventListener('click', () => {
+    const t = cd.target, snap = JSON.parse(cd.snapshot);
+    if (t.kind === 'item') {
+        const it = findItem(t.uid);
+        it.colors = snap;
+        rebuildObject(it);
+        saveGame();
+    } else targetSet(t, snap, true);
+    renderColorDialog();
+});
 const picker = colorDialog.querySelector('.cd-picker');
 picker.addEventListener('input', () => {
     const hex = normHex(picker.value);
     if (!hex) return;
-    setItemColor(hex, false);
+    targetSet(cd.target, hex, false);
     colorDialog.querySelector('.cd-preview').style.background = hex;
 });
 picker.addEventListener('change', () => {
     const hex = normHex(picker.value);
     if (!hex) return;
-    setItemColor(hex, true);
+    targetSet(cd.target, hex, true);
     addRecentColor(hex);
     renderColorDialog();
 });
@@ -1035,13 +1298,131 @@ picker.addEventListener('change', () => {
         wrap.appendChild(row);
     });
 })();
-document.getElementById('color-btn').addEventListener('click', openColorDialog);
+document.getElementById('color-btn').addEventListener('click', () => openColorDialog());
+
+// ---------- 床・壁 ----------
+const SURFACES = [
+    { kind: 'floor', name: '床', patterns: FLOOR_PATTERNS, draw: drawFloor },
+    { kind: 'wall', name: '壁', patterns: WALL_PATTERNS, draw: drawWall },
+];
+// 柄の見本（大きな柄の一部を切り出す）
+function patternThumb(draw, pattern, color) {
+    const src = draw(pattern, color).image;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 72;
+    const crop = Math.min(src.width, src.height) / 2.5;
+    cv.getContext('2d').drawImage(src, 0, src.height - crop, crop, crop, 0, 0, 72, 72);
+    return cv.toDataURL();
+}
+function renderSurfacePanel() {
+    const panel = document.getElementById('surface-panel');
+    if (panel.hidden) return;
+    panel.innerHTML = '';
+    for (const sf of SURFACES) {
+        const sec = document.createElement('section');
+        sec.className = 'surface';
+        sec.dataset.kind = sf.kind;
+        const head = document.createElement('div');
+        head.className = 'surface-head';
+        head.innerHTML = `<h3>${sf.name}</h3><button class="surface-color"><span class="dot"></span>色を変える</button>`;
+        head.querySelector('.dot').style.background = surfaceColor(sf.kind);
+        head.querySelector('.surface-color').addEventListener('click', () => openColorDialog({ kind: sf.kind }));
+        sec.appendChild(head);
+        const list = document.createElement('div');
+        list.className = 'patterns';
+        for (const [key, pat] of Object.entries(sf.patterns)) {
+            const b = document.createElement('button');
+            b.className = 'pattern';
+            b.dataset.pattern = key;
+            b.setAttribute('aria-pressed', String(game[sf.kind].pattern === key));
+            // 色を決めていればその色で、決めていなければ柄の元の色で見本を描く
+            const img = document.createElement('img');
+            img.alt = '';
+            img.src = patternThumb(sf.draw, key, game[sf.kind].color || pat.color);
+            const label = document.createElement('span');
+            label.textContent = pat.name;
+            b.append(img, label);
+            b.addEventListener('click', () => {
+                if (game[sf.kind].pattern === key) return;
+                game[sf.kind].pattern = key;
+                applySurfaces();
+                saveGame();
+                renderSurfacePanel();
+            });
+            list.appendChild(b);
+        }
+        sec.appendChild(list);
+        panel.appendChild(sec);
+    }
+}
+// 一覧の上のタブ（家具 / 床・壁）
+function showTab(name) {
+    document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+    document.getElementById('furniture-panel').hidden = name !== 'furniture';
+    document.getElementById('surface-panel').hidden = name !== 'surface';
+    if (name === 'surface') { select(null); renderSurfacePanel(); }
+}
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
+
+// ---------- 元に戻す・やり直す ----------
+const MAX_HISTORY = 100;
+const undoStack = [], redoStack = [];
+let lastRoom = null; // 最後に記録した部屋の状態（JSON）
+function roomSnapshot() { return JSON.stringify({ items: game.items, floor: game.floor, wall: game.wall }); }
+// 部屋が前の記録から変わっていたら、前の状態を「元に戻す」に積む（saveGame から呼ぶ）
+function recordHistory() {
+    const now = roomSnapshot();
+    if (lastRoom === null || now === lastRoom) { lastRoom = now; return; }
+    undoStack.push(lastRoom);
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    redoStack.length = 0;
+    lastRoom = now;
+    updateHistoryButtons();
+}
+function restoreRoom(json) {
+    const r = JSON.parse(json);
+    game.items = r.items;
+    game.floor = r.floor;
+    game.wall = r.wall;
+    lastRoom = json;
+    rebuildAll();
+    applySurfaces();
+    select(findItem(selectedUid) ? selectedUid : null);
+    renderSurfacePanel();
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(game)); } catch (err) { console.error(err); }
+    updateHistoryButtons();
+}
+function undo() {
+    recordHistory(); // まだ記録していない変更があれば先に記録
+    if (!undoStack.length) return;
+    redoStack.push(lastRoom);
+    restoreRoom(undoStack.pop());
+}
+function redo() {
+    recordHistory();
+    if (!redoStack.length) return;
+    undoStack.push(lastRoom);
+    restoreRoom(redoStack.pop());
+}
+function updateHistoryButtons() {
+    document.getElementById('undo-btn').disabled = !undoStack.length;
+    document.getElementById('redo-btn').disabled = !redoStack.length;
+}
+document.getElementById('undo-btn').addEventListener('click', undo);
+document.getElementById('redo-btn').addEventListener('click', redo);
+window.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || document.querySelector('dialog[open]')) return;
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+});
 
 // ---------- 部屋のプリセット ----------
 const presetDialog = document.getElementById('preset-dialog');
 const presetName = document.getElementById('preset-name');
 
-function cloneItems(items) { return items.map(it => ({ ...it })); }
+function cloneItems(items) { return items.map(it => ({ ...it, colors: { ...it.colors } })); }
 function formatDate(t) {
     if (!t) return '';
     const d = new Date(t);
@@ -1063,7 +1444,7 @@ function renderPresets() {
             <button class="preset-load">呼び出す</button>
             <button class="preset-del" aria-label="削除">🗑</button>`;
         row.querySelector('b').textContent = ps.name;
-        row.querySelector('small').textContent = `家具 ${ps.items.length} 個・${formatDate(ps.savedAt)}`;
+        row.querySelector('small').textContent = `家具 ${ps.items.length} 個・${FLOOR_PATTERNS[ps.floor.pattern].name}・${formatDate(ps.savedAt)}`;
         row.querySelector('.preset-load').addEventListener('click', () => loadPreset(ps.id));
         row.querySelector('.preset-del').addEventListener('click', () => {
             if (!confirm(`「${ps.name}」を削除しますか？`)) return;
@@ -1077,14 +1458,14 @@ function renderPresets() {
 }
 function savePreset(name) {
     name = (name || '').trim().slice(0, 30) || `部屋 ${game.nextPresetId}`;
+    const data = { items: cloneItems(game.items), floor: { ...game.floor }, wall: { ...game.wall }, savedAt: Date.now() };
     const same = game.presets.find(p => p.name === name);
     if (same) {
         if (!confirm(`「${name}」はもうあります。上書きしますか？`)) return false;
-        same.items = cloneItems(game.items);
-        same.savedAt = Date.now();
+        Object.assign(same, data);
     } else {
         if (game.presets.length >= MAX_PRESETS) { toast(`プリセットは ${MAX_PRESETS} 個までです`); return false; }
-        game.presets.unshift({ id: game.nextPresetId++, name, savedAt: Date.now(), items: cloneItems(game.items) });
+        game.presets.unshift({ id: game.nextPresetId++, name, ...data });
     }
     saveGame();
     toast(`「${name}」を保存しました`);
@@ -1093,14 +1474,18 @@ function savePreset(name) {
 function loadPreset(id) {
     const ps = game.presets.find(p => p.id === id);
     if (!ps) return;
-    if (game.items.length && !confirm(`今の部屋を「${ps.name}」に置き換えますか？`)) return;
+    // 「元に戻す」で戻せるので、確認は出さない
     // 部屋の家具には新しい番号を振る（プリセットと部屋で番号が混ざらないように）
-    game.items = ps.items.map(it => ({ ...it, uid: game.nextUid++ }));
+    game.items = cloneItems(ps.items).map(it => ({ ...it, uid: game.nextUid++ }));
+    game.floor = { ...ps.floor };
+    game.wall = { ...ps.wall };
     select(null);
     rebuildAll();
+    applySurfaces();
+    renderSurfacePanel();
     saveGame();
     presetDialog.close();
-    toast(`「${ps.name}」を呼び出しました`);
+    toast(`「${ps.name}」を呼び出しました（↶ で戻せます）`);
 }
 document.getElementById('preset-btn').addEventListener('click', () => {
     presetName.value = '';
@@ -1130,6 +1515,9 @@ applyAppearance();
 renderTags();
 renderCatalog();
 rebuildAll();
+applySurfaces();
+recordHistory(); // 起動したときの部屋を「元に戻す」の起点にする
+updateHistoryButtons();
 updateCamera();
 resize();
 document.getElementById('version').textContent = `v${APP_VERSION}`;
@@ -1142,9 +1530,34 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(err => console.error(err));
 }
 
+// 面がぴったり重なってチラつく箇所を探す（テスト用）。同じ向きの面が同じ平面にあり、重なる広さがあるものを返す
+function findCoplanarFaces() {
+    const issues = [], E = 1e-4, axes = ['x', 'y', 'z'];
+    for (const [type, def] of Object.entries(FURNITURE)) {
+        const g = new THREE.Group();
+        def.build(g, colorsFor({ type, colors: {} }));
+        g.updateMatrixWorld(true);
+        const boxes = [];
+        g.traverse(o => { if (o.isMesh && o.geometry.type === 'BoxGeometry') boxes.push(new THREE.Box3().setFromObject(o)); });
+        for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+            const a = boxes[i], b = boxes[j];
+            for (const ax of axes) for (const side of ['min', 'max']) {
+                if (Math.abs(a[side][ax] - b[side][ax]) > E) continue;
+                if (ax === 'y' && side === 'min' && a.min.y < E) continue; // 床に付いた底面は見えない
+                const others = axes.filter(o => o !== ax);
+                const overlap = others.every(o => Math.min(a.max[o], b.max[o]) - Math.max(a.min[o], b.min[o]) > E);
+                if (overlap) issues.push(`${type}: 部品 ${i} と ${j} の ${ax} ${side} 面`);
+            }
+        }
+        g.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+    }
+    return issues;
+}
+
 // テストから使う
 window.__lifemaker = {
-    game: () => game, selected: () => selectedUid, cam, addItem, savePreset, loadPreset, openColorDialog, setHsl, hslOf, hslToHex, filter, rotateSelected, removeSelected, select, isBlocked, footprint, APP_VERSION, FURNITURE,
+    findCoplanarFaces, testBox: box, save: saveGame,
+    game: () => game, selected: () => selectedUid, cam, addItem, savePreset, loadPreset, openColorDialog, setHsl, hslOf, undo, redo, showTab, history: () => ({ undo: undoStack.length, redo: redoStack.length }), hslToHex, filter, rotateSelected, removeSelected, select, isBlocked, footprint, APP_VERSION, FURNITURE,
     // 家具の中心が画面のどこに映るか（クライアント座標）
     screenOf(uid, height = 0.3) {
         const item = findItem(uid);
