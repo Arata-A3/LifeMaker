@@ -2,6 +2,8 @@
 
 スマホで遊ぶ模様替えゲーム。家具を自由に置いて部屋を作り、一緒に住むキャラクターとの暮らしを楽しむ。
 
+遊ぶ: https://arata-a3.github.io/LifeMaker/
+
 ## いまできること（v0.1.0）
 
 - 3D の部屋（6m 四方、12×12 マス）に家具を置く
@@ -20,7 +22,7 @@ PC ではキーボードも使える（R: 回転、Delete: しまう、Esc: 選�
 
 - ブラウザで動く（HTML / CSS / JavaScript）。3D は [three.js](https://threejs.org/) r187（`lib/three.module.min.js`、MIT ライセンス: `lib/three.LICENSE`）
 - 家具は今のところ箱や円柱を組み合わせた積み木風。あとからモデルに差し替える
-- 公開は GitHub Pages の予定（試作版ができたら、リポジトリを公開にして出す）
+- 公開: GitHub Pages（main ブランチの `/`）
 - テスト: `node tests/run.mjs`（ヘッドレス Chrome で動かす）。`node tests/run.mjs <フォルダ>` で各画面サイズのスクリーンショットも撮る
 
 | ファイル | 中身 |
