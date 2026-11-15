@@ -20,28 +20,36 @@
 <meta property="og:image:height" content="512">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="css/style.css?v=0.1.0">
+<link rel="stylesheet" href="css/style.css?v=0.2.0">
 </head>
 <body>
 <div id="app">
     <header>
         <h1>LifeMaker</h1>
-        <button id="menu-btn" class="icon-btn" aria-label="設定" aria-haspopup="dialog">⚙</button>
+        <div class="header-btns">
+            <button id="preset-btn" class="pill-btn" aria-haspopup="dialog">📁 プリセット</button>
+            <button id="menu-btn" class="icon-btn" aria-label="設定" aria-haspopup="dialog">⚙</button>
+        </div>
     </header>
 
     <main>
         <div id="view">
             <canvas id="scene"></canvas>
-            <div id="hint">家具を選んで置こう。ドラッグで部屋を回せます</div>
+            <div id="hint">家具を選んで置こう。ダブルタップで回転、ドラッグで部屋を回せます</div>
             <div id="toolbar" hidden>
                 <span id="sel-name"></span>
                 <button id="rotate-btn">↻ 回転</button>
+                <button id="color-btn">🎨 色</button>
                 <button id="remove-btn">しまう</button>
                 <button id="done-btn">完了</button>
             </div>
         </div>
 
         <section id="catalog" aria-label="家具">
+            <div id="filters">
+                <input id="search" type="search" placeholder="🔍 さがす" aria-label="家具を名前やタグで探す" autocomplete="off">
+                <div id="tags" role="group" aria-label="タグで絞り込む"></div>
+            </div>
             <div id="items"></div>
         </section>
     </main>
@@ -62,8 +70,35 @@
     <button id="menu-close" class="primary">閉じる</button>
 </dialog>
 
+<dialog id="color-dialog" class="sheet">
+    <div class="cd-head">
+        <span class="cd-preview"></span>
+        <div><div class="cd-title"></div><div class="cd-hex"></div></div>
+    </div>
+    <section class="cd-recent-sec"><h3>最近使った色</h3><div class="cd-recent swatches"></div></section>
+    <section class="cd-same-sec"><h3>ほかの家具と同じ色</h3><div class="cd-same"></div></section>
+    <section><h3>色の候補</h3><div class="cd-palette swatches"></div></section>
+    <section><h3>微調整</h3><div class="cd-sliders"></div></section>
+    <section class="cd-other"><h3>ほかの色</h3><input type="color" class="cd-picker" aria-label="ほかの色を選ぶ"></section>
+    <div class="cd-actions">
+        <button class="cd-revert">開いたときの色に戻す</button>
+        <button class="cd-auto">元の色に戻す</button>
+        <button class="cd-close primary">閉じる</button>
+    </div>
+</dialog>
+
+<dialog id="preset-dialog" class="sheet">
+    <h2>部屋のプリセット</h2>
+    <div class="preset-new">
+        <input id="preset-name" type="text" maxlength="30" placeholder="名前（例: くつろぎの部屋）" autocomplete="off">
+        <button id="preset-save" class="primary">今の部屋を保存</button>
+    </div>
+    <div id="preset-list"></div>
+    <button id="preset-close" class="wide">閉じる</button>
+</dialog>
+
 <div id="toast" role="status"></div>
 
-<script type="module" src="js/app.js?v=0.1.0"></script>
+<script type="module" src="js/app.js?v=0.2.0"></script>
 </body>
 </html>
