@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<script>try { const a = JSON.parse(localStorage.getItem('lifemaker_save') || '{}').appearance; if (a === 'light' || a === 'dark') document.documentElement.dataset.theme = a; } catch (e) { }</script>
+<title>LifeMaker</title>
+<meta name="description" content="スマホで遊ぶ3Dの模様替えゲーム。家具を自由に置いて部屋を作ろう。">
+<meta name="theme-color" content="#f3efe8">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="LifeMaker">
+<meta property="og:title" content="LifeMaker">
+<meta property="og:description" content="スマホで遊ぶ3Dの模様替えゲーム。家具を自由に置いて部屋を作ろう。">
+<meta property="og:url" content="https://arata-a3.github.io/LifeMaker/">
+<meta property="og:image" content="https://arata-a3.github.io/LifeMaker/og-image.png">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta property="og:locale" content="ja_JP">
+<meta name="twitter:card" content="summary">
+<link rel="stylesheet" href="css/style.css?v=0.1.0">
+</head>
+<body>
+<div id="app">
+    <header>
+        <h1>LifeMaker</h1>
+        <button id="menu-btn" class="icon-btn" aria-label="設定" aria-haspopup="dialog">⚙</button>
+    </header>
+
+    <main>
+        <div id="view">
+            <canvas id="scene"></canvas>
+            <div id="hint">家具を選んで置こう。ドラッグで部屋を回せます</div>
+            <div id="toolbar" hidden>
+                <span id="sel-name"></span>
+                <button id="rotate-btn">↻ 回転</button>
+                <button id="remove-btn">しまう</button>
+                <button id="done-btn">完了</button>
+            </div>
+        </div>
+
+        <section id="catalog" aria-label="家具">
+            <div id="items"></div>
+        </section>
+    </main>
+
+    <footer id="version"></footer>
+</div>
+
+<dialog id="menu">
+    <h2>設定</h2>
+    <fieldset>
+        <legend>明るさ</legend>
+        <label><input type="radio" name="appearance" value="auto"> 端末に合わせる</label>
+        <label><input type="radio" name="appearance" value="light"> ライト</label>
+        <label><input type="radio" name="appearance" value="dark"> ダーク</label>
+    </fieldset>
+    <button id="clear-room-btn">部屋を空にする</button>
+    <button id="reset-btn" class="danger">全てのデータを消す</button>
+    <button id="menu-close" class="primary">閉じる</button>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script type="module" src="js/app.js?v=0.1.0"></script>
+</body>
+</html>

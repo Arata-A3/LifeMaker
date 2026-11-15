@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#d9774b"/>
+  <!-- 奥の壁 2 枚と床（部屋を斜めから見たところ） -->
+  <path d="M10 40 L10 21 L32 9 L32 28 Z" fill="#f6f1e8"/>
+  <path d="M32 28 L32 9 L54 21 L54 40 Z" fill="#e4d9c8"/>
+  <path d="M10 40 L32 28 L54 40 L32 52 Z" fill="#c89a6a"/>
+  <!-- ソファ -->
+  <path d="M17 38 L28 32 L28 28 L17 34 Z" fill="#6f8d72"/>
+  <path d="M17 38 L28 32 L33 35 L22 41 Z" fill="#8aa58c"/>
+  <!-- 植物 -->
+  <path d="M42 39 L46 39 L45.4 44 L42.6 44 Z" fill="#a85f3d"/>
+  <circle cx="44" cy="35" r="4.4" fill="#5f9e5a"/>
+</svg>
