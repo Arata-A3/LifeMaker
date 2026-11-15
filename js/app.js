@@ -1,6 +1,6 @@
 import * as THREE from '../lib/three.module.min.js';
 
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.1';
 const SAVE_KEY = 'lifemaker_save';
 const SAVE_VERSION = 3; // 2: 家具の色を部位ごとに、床と壁を追加 / 3: テレビをテレビ台から分けた
 
@@ -125,14 +125,16 @@ const FURNITURE = {
     },
     wardrobe: {
         name: 'クローゼット', icon: '🚪', size: [2, 1], tags: ['収納', '寝室', 'シンプル'],
-        slots: [['main', '本体', '#e5dccd'], ['handle', '取っ手', '#8a7a66'], ['plinth', '台座', '#bfae93']],
+        slots: [['main', '本体', '#e5dccd'], ['door', '扉', '#ece5d8'], ['handle', '取っ手', '#8a7a66'], ['plinth', '台座', '#bfae93']],
         top: 1.9,
         build(g, c) {
             box(g, 0.9, 0.08, 0.42, c.plinth, 0, 0, -0.02);           // 台座は本体より少し内側
             box(g, 0.94, 1.82, 0.46, c.main, 0, 0.08, -0.01);         // 本体は台座の上に載せる
-            box(g, 0.006, 1.66, 0.006, shade(c.main, -0.25), 0, 0.16, 0.223);
-            box(g, 0.02, 0.18, 0.03, c.handle, -0.05, 0.95, 0.235);
-            box(g, 0.02, 0.18, 0.03, c.handle, 0.05, 0.95, 0.235);
+            // 扉は 2 枚の板を少し浮かせて、間のすき間で分かれ目を見せる
+            box(g, 0.44, 1.7, 0.008, c.door, -0.226, 0.14, 0.224);
+            box(g, 0.44, 1.7, 0.008, c.door, 0.226, 0.14, 0.224);
+            box(g, 0.02, 0.18, 0.03, c.handle, -0.05, 0.95, 0.238);
+            box(g, 0.02, 0.18, 0.03, c.handle, 0.05, 0.95, 0.238);
         },
     },
     tvstand: {
@@ -1114,7 +1116,29 @@ function ndc(x, y) {
     const r = canvas.getBoundingClientRect();
     return new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
 }
-function pickItem(x, y) {
+// 小物は小さくて押しにくいので、指の近く（radius px 以内）にあれば選ぶ
+function nearSmall(x, y, radius) {
+    const r = canvas.getBoundingClientRect();
+    let best = null, bestD = radius;
+    for (const it of game.items) {
+        if (kindOf(it) !== 'small') continue;
+        const g = objects.get(it.uid);
+        if (!g) continue;
+        const c = new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3()).project(camera);
+        const d = Math.hypot(r.left + (c.x + 1) / 2 * r.width - x, r.top + (1 - c.y) / 2 * r.height - y);
+        if (d < bestD) { bestD = d; best = it; }
+    }
+    return best;
+}
+function pickItem(x, y, radius = 0) {
+    const hit = pickByRay(x, y);
+    if (hit && kindOf(hit) === 'small') return hit;
+    // 何もない所・敷物・小物が載っている家具を押したときだけ、近くの小物を選ぶ
+    const near = radius && nearSmall(x, y, radius);
+    if (near && (!hit || kindOf(hit) === 'flat' || supportOf(near) === hit)) return near;
+    return hit;
+}
+function pickByRay(x, y) {
     raycaster.setFromCamera(ndc(x, y), camera);
     const hits = raycaster.intersectObjects(furnitureRoot.children, true);
     let flatHit = null;
@@ -1164,7 +1188,7 @@ canvas.addEventListener('pointerdown', (e) => {
     }
     if (pointers.size > 2) return;
 
-    const item = pickItem(e.clientX, e.clientY);
+    const item = pickItem(e.clientX, e.clientY, e.pointerType === 'mouse' ? 10 : 22);
     const kind = item && kindOf(item);
     const base = { type: 'drag', uid: item?.uid, startX: e.clientX, startY: e.clientY, moved: false };
     let p = null;
@@ -2015,7 +2039,7 @@ function findCoplanarFaces() {
 
 // テストから使う
 window.__lifemaker = {
-    findCoplanarFaces, testBox: box, supportOf, splitTv, save: saveGame, smallBase, kindOf, walls: () => walls.map(w => !w.hidden), updateCamera, rebuildAll,
+    findCoplanarFaces, testBox: box, supportOf, splitTv, pickItem: (x, y, r) => pickItem(x, y, r)?.uid ?? null, save: saveGame, smallBase, kindOf, walls: () => walls.map(w => !w.hidden), updateCamera, rebuildAll,
     viewShift: () => viewShift, visibleOf: (uid) => objects.get(uid).visible,
     meshColors: (uid) => { const s = new Set(); objects.get(uid).traverse(o => { if (o.isMesh) s.add('#' + o.material.color.getHexString()); }); return [...s]; },
     game: () => game, selected: () => selectedUid, cam, addItem, savePreset, loadPreset, openColorDialog, setHsl, hslOf, undo, redo, showTab, history: () => ({ undo: undoStack.length, redo: redoStack.length }), hslToHex, filter, rotateSelected, removeSelected, select, isBlocked, footprint, APP_VERSION, FURNITURE,

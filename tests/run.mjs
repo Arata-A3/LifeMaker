@@ -487,6 +487,18 @@ await test('マス目と自由配置を切り替えられる', async () => {
     await evaluate(`document.getElementById('done-btn').click()`);
 });
 
+await test('小物は少し外れた所を押しても選べる', async () => {
+    await evaluate(`document.querySelector('#items .item[data-type="mug"]').click()`);
+    const uid = await L('L.selected()');
+    await L('L.select(null)');
+    const p = await L(`L.screenOf(${uid}, 0.06)`);
+    assert(await L(`L.pickItem(${p.x}, ${p.y}, 0)`) === uid, '真ん中を押しても選べない');
+    assert(await L(`L.pickItem(${p.x + 16}, ${p.y + 6}, 22)`) === uid, '少し外れた所で選べない');
+    await tapAt({ x: p.x + 8, y: p.y + 3 }); // マウスは 10px まで
+    assert(await L('L.selected()') === uid, 'タップで選べない');
+    await evaluate(`document.getElementById('done-btn').click()`);
+});
+
 await test('しまうと消える', async () => {
     const n = await L('L.game().items.length');
     await evaluate(`document.querySelector('#items .item[data-type="lamp"]').click()`);
