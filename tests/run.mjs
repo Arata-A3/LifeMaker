@@ -233,7 +233,7 @@ await test('名前・タグで家具を絞り込める', async () => {
     await evaluate(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
     await evaluate(`[...document.querySelectorAll('#tags .tag')].find(b => b.textContent === '収納').click()`);
     const n = await count();
-    assert(n === 4, `収納のタグで 4 つにならない: ${n}`);
+    assert(n === 5, `収納のタグで 5 つにならない: ${n}`);
     await evaluate(`(() => { const s = document.getElementById('search'); s.value = 'zzz'; s.dispatchEvent(new Event('input')); })()`);
     assert(await count() === 0 && await evaluate(`!!document.querySelector('#items .empty')`), '見つからないときの表示がない');
     await evaluate(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
@@ -437,6 +437,56 @@ await test('色の画面を開いてもカメラは動かず、隠れるとき�
     await L('L.select(null)');
 });
 
+await test('テレビは小物で、テレビ台の上に置かれる', async () => {
+    assert(await L('L.FURNITURE.tv.small') === true, 'テレビが小物になっていない');
+    await evaluate(`document.querySelector('#items .item[data-type="tvstand"]').click()`);
+    const st = await L('L.selected()');
+    await evaluate(`document.querySelector('#items .item[data-type="tv"]').click()`);
+    const tv = await L('L.selected()');
+    const s = await L(`L.supportOf(L.game().items.find(i => i.uid === ${tv}))?.uid ?? null`);
+    assert(s === st, `テレビがテレビ台に載らない: ${s} / ${st}`);
+    assert(!(await L(`L.isBlocked(L.game().items.find(i => i.uid === ${tv}))`)), 'テレビ台の上なのに重なりの印になる');
+    await evaluate(`document.getElementById('done-btn').click()`);
+});
+
+await test('本棚は「きっちり」と「ばらばら」の 2 種類', async () => {
+    const r = await L(`({ a: L.FURNITURE.bookshelf.name, b: L.FURNITURE.bookshelf2.name, bs: L.FURNITURE.bookshelf2.slots.map(s => s.name) })`);
+    assert(r.a.includes('きっちり') && r.b.includes('ばらばら'), `名前が違う: ${r.a} / ${r.b}`);
+    assert(r.bs.filter(n => n.startsWith('本 ')).length === 4, `ばらばらの本の部位が 4 つない: ${r.bs}`);
+    await evaluate(`document.querySelector('#items .item[data-type="bookshelf2"]').click()`);
+    const uid = await L('L.selected()');
+    const n = (await L(`L.meshColors(${uid})`)).length;
+    assert(n >= 12, `ばらばらの本棚の色が少ない: ${n}`);
+    await evaluate(`document.getElementById('done-btn').click()`);
+});
+
+await test('マス目と自由配置を切り替えられる', async () => {
+    const btn = () => evaluate(`document.getElementById('snap-btn').textContent`);
+    assert((await btn()).includes('マス目') && await L('L.game().snap') === true, '最初がマス目になっていない');
+    await evaluate(`document.getElementById('snap-btn').click()`);
+    assert((await btn()).includes('自由') && await L('L.game().snap') === false, '自由に切り替わらない');
+    await evaluate(`document.querySelector('#items .item[data-type="vase"]').click()`);
+    const uid = await L('L.selected()');
+    const p = await L(`L.screenOf(${uid}, 0.1)`);
+    await dragMouse(p, { x: p.x + 23, y: p.y + 11 }, 10);
+    let it = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
+    assert(!Number.isInteger(it.gx) || !Number.isInteger(it.gz), `自由に置けていない: ${it.gx}, ${it.gz}`);
+    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save'))`);
+    assert(saved.snap === false && saved.items.find(i => i.uid === uid).gx === it.gx, '自由配置が保存されていない');
+    // 開き直しても位置と設定が残る
+    await open();
+    it = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
+    assert(it.gx === saved.items.find(i => i.uid === uid).gx && await L('L.game().snap') === false, '開き直すと自由配置が消える');
+    // マス目に戻して動かすと、マスにそろう
+    await evaluate(`document.getElementById('snap-btn').click()`);
+    await L(`L.select(${uid})`);
+    const q = await L(`L.screenOf(${uid}, 0.1)`);
+    await dragMouse(q, { x: q.x + 40, y: q.y + 30 }, 10);
+    it = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
+    assert(Number.isInteger(it.gx) && Number.isInteger(it.gz), `マス目にそろわない: ${it.gx}, ${it.gz}`);
+    await evaluate(`document.getElementById('done-btn').click()`);
+});
+
 await test('しまうと消える', async () => {
     const n = await L('L.game().items.length');
     await evaluate(`document.querySelector('#items .item[data-type="lamp"]').click()`);
@@ -478,6 +528,23 @@ await test('おかしな値のセーブを直して読む', async () => {
     assert(JSON.stringify(it.colors) === JSON.stringify({ main: '#abcdef' }), `v0.2.0 の 1 色の形式が移っていない: ${JSON.stringify(it.colors)}`);
     const f = await L('L.game().floor');
     assert(f.pattern === 'wood' && f.color === null, `おかしな床が直っていない: ${JSON.stringify(f)}`);
+});
+
+await test('v0.4.0 までのテレビ台は、テレビを分けて上に載せる', async () => {
+    await clearSave();
+    await evaluate(`localStorage.setItem('lifemaker_save', JSON.stringify({ saveVersion: 2, nextUid: 3, items: [{ uid: 2, type: 'tvstand', gx: 2, gz: 0, rot: 1, colors: { main: '#112233', tv: '#445566' } }],
+        presets: [{ id: 1, name: 'a', items: [{ uid: 1, type: 'tvstand', gx: 0, gz: 0, rot: 0, colors: {} }] }] }))`);
+    await open();
+    const r = await L(`(() => { const g = L.game(); const tv = g.items.find(i => i.type === 'tv'); return { n: g.items.length, tv, sup: tv && L.supportOf(tv)?.type, next: g.nextUid, st: g.items.find(i => i.type === 'tvstand').colors, pn: g.presets[0].items.map(i => i.type) }; })()`);
+    assert(r.n === 2 && r.tv && r.sup === 'tvstand', `テレビが分かれていない: ${JSON.stringify(r)}`);
+    assert(r.tv.rot === 1 && r.tv.colors.main === '#445566', `テレビの向きや色が引き継がれていない: ${JSON.stringify(r.tv)}`);
+    assert(JSON.stringify(r.st) === JSON.stringify({ main: '#112233' }), `テレビ台の色が変: ${JSON.stringify(r.st)}`);
+    assert(r.next > r.tv.uid, 'nextUid がテレビの番号より小さい');
+    assert(JSON.stringify(r.pn) === JSON.stringify(['tvstand', 'tv']), `プリセットのテレビが分かれていない: ${r.pn}`);
+    // 新しい形式で保存したあとは、もう一度分けない
+    await L('L.save()');
+    await open();
+    assert(await L(`L.game().items.filter(i => i.type === 'tv').length`) === 1, 'テレビが増えた');
 });
 
 if (SHOT_DIR) {

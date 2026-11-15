@@ -253,6 +253,11 @@ dialog.sheet .wide { display: block; width: 100%; margin-top: 12px; }
     border: 1px solid var(--line); background: var(--panel); box-shadow: 0 2px 8px rgb(0 0 0 / .12);
 }
 .round-btn:disabled { opacity: .4; cursor: default; }
+.snap-btn {
+    height: 42px; padding: 0 12px; border-radius: 999px; font-size: 14px; white-space: nowrap;
+    border: 1px solid var(--line); background: var(--panel); box-shadow: 0 2px 8px rgb(0 0 0 / .12);
+}
+.snap-btn[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: transparent; }
 
 /* ---------- タブ（家具 / 床・壁） ---------- */
 #tabs { display: flex; gap: 4px; padding: 8px 12px 0; }

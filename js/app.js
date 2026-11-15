@@ -1,8 +1,8 @@
 import * as THREE from '../lib/three.module.min.js';
 
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 const SAVE_KEY = 'lifemaker_save';
-const SAVE_VERSION = 2; // 2: 家具の色を部位ごとに、床と壁を追加
+const SAVE_VERSION = 3; // 2: 家具の色を部位ごとに、床と壁を追加 / 3: テレビをテレビ台から分けた
 
 // 部屋の大きさ: 1 マス 0.5m、12×12 マス（6m 四方）
 const CELL = 0.5;
@@ -71,27 +71,54 @@ const FURNITURE = {
         },
     },
     bookshelf: {
-        name: '本棚', icon: '📚', size: [2, 1], tags: ['収納', '書斎', 'ナチュラル', '木'],
+        name: '本棚（きっちり）', icon: '📚', size: [2, 1], tags: ['収納', '書斎', 'ナチュラル', '木'],
         slots: [['main', '本棚', '#9c7350'], ['back', '背板', '#7c5a3e'], ['books1', '本 1', '#c45c4a'], ['books2', '本 2', '#4a7cc4'], ['books3', '本 3', '#e3b34c']],
         top: 1.83,
         build(g, c) {
-            const W = 0.94, D = 0.4, H = 1.8, z = -0.04;
-            box(g, 0.03, H, D, c.main, -W / 2 + 0.015, 0, z);
-            box(g, 0.03, H, D, c.main, W / 2 - 0.015, 0, z);
-            box(g, W + 0.01, 0.03, D + 0.01, c.main, 0, H, z);
-            box(g, W - 0.064, H - 0.01, 0.02, c.back, 0, 0.005, z - D / 2 + 0.012);
-            // 本は 3 冊ずつのまとまりで、本 1・本 2・本 3 の色を順に使う。まとまりの中は少しずつ明るさを変える
-            const groups = [c.books1, c.books2, c.books3], tones = [0, 0.07, -0.06];
-            let k = 0;
+            const { W, z } = bookshelfFrame(g, c);
+            // 段ごとに 1 色。同じ高さ・同じ厚さの本をすき間なく並べる
+            const rows = [c.books1, c.books2, c.books3, c.books1];
             for (let i = 0; i < 4; i++) {
-                const y = i * 0.44;
-                box(g, W - 0.062, 0.03, D - 0.004, c.main, 0, y, z + 0.002);
-                let x = -W / 2 + 0.06;
-                while (x < W / 2 - 0.12) {
-                    const bw = 0.04 + ((k * 7) % 5) * 0.012, bh = 0.24 + ((k * 3) % 4) * 0.03;
-                    box(g, bw, bh, 0.26, shade(groups[Math.floor(k / 3) % 3], tones[k % 3]), x + bw / 2, y + 0.03, z + 0.02);
-                    x += bw + 0.005; k++;
-                    if (k % 9 === 0) x += 0.12;
+                const y = i * 0.44 + 0.03;
+                let k = 0;
+                for (let x = -W / 2 + 0.035; x + 0.045 < W / 2 - 0.035; x += 0.049, k++) {
+                    box(g, 0.045, 0.3, 0.28, shade(rows[i], k % 2 ? 0.025 : 0), x + 0.0225, y, z + 0.02);
+                }
+            }
+        },
+    },
+    bookshelf2: {
+        name: '本棚（ばらばら）', icon: '📖', size: [2, 1], tags: ['収納', '書斎', 'ナチュラル', '木'],
+        slots: [['main', '本棚', '#9c7350'], ['back', '背板', '#7c5a3e'], ['books1', '本 1', '#c45c4a'], ['books2', '本 2', '#4a7cc4'], ['books3', '本 3', '#e3b34c'], ['books4', '本 4', '#5d9c6a']],
+        top: 1.83,
+        build(g, c) {
+            const { W, z } = bookshelfFrame(g, c);
+            // 色・高さ・厚さ・奥行きがばらばらの本。ところどころすき間や、寝かせて積んだ本がある
+            const groups = [c.books1, c.books2, c.books3, c.books4];
+            const rnd = seeded(23);
+            const pick = () => shade(groups[Math.floor(rnd() * 4)], (rnd() - 0.5) * 0.22);
+            for (let i = 0; i < 4; i++) {
+                const y = i * 0.44 + 0.03;
+                const end = W / 2 - 0.035;
+                let x = -W / 2 + 0.035;
+                while (x < end - 0.08) {
+                    const r = rnd();
+                    if (r < 0.08) { x += 0.04 + rnd() * 0.08; continue; }
+                    if (r < 0.18 && end - x > 0.26) {
+                        const w = 0.2 + rnd() * 0.03, n = 2 + Math.floor(rnd() * 3);
+                        let yy = y;
+                        for (let k = 0; k < n; k++) {
+                            const bh = 0.03 + rnd() * 0.02;
+                            box(g, w - k * 0.012, bh, 0.25 - k * 0.011, pick(), x + w / 2, yy, z + 0.02 - k * 0.003);
+                            yy += bh;
+                        }
+                        x += w + 0.01;
+                        continue;
+                    }
+                    const bw = 0.028 + rnd() * 0.035, bh = 0.2 + rnd() * 0.14, bd = 0.22 + rnd() * 0.07;
+                    if (x + bw > end) break;
+                    box(g, bw, bh, bd, pick(), x + bw / 2, y, z - 0.18 + bd / 2 + 0.012);
+                    x += bw + 0.003;
                 }
             }
         },
@@ -109,16 +136,15 @@ const FURNITURE = {
         },
     },
     tvstand: {
-        name: 'テレビ台', icon: '📺', size: [3, 1], tags: ['収納', '家電', 'リビング', 'シンプル'],
-        slots: [['main', '台', '#6f5a48'], ['tv', 'テレビ', '#2b2b2e']],
+        name: 'テレビ台', icon: '🗄', size: [3, 1], tags: ['収納', 'リビング', 'シンプル'],
+        slots: [['main', '台', '#6f5a48'], ['front', '引き出し', '#7d6753'], ['handle', '取っ手', '#d8c8b0']],
         top: 0.42,
         build(g, c) {
             box(g, 1.4, 0.42, 0.42, c.main, 0, 0, 0);
-            box(g, 0.6, 0.006, 0.006, shade(c.main, -0.2), -0.3, 0.2, 0.213);
-            box(g, 0.3, 0.03, 0.18, c.tv, 0, 0.42, -0.04);
-            box(g, 0.05, 0.12, 0.03, c.tv, 0, 0.45, -0.04);
-            box(g, 1.1, 0.64, 0.04, c.tv, 0, 0.55, -0.04);
-            box(g, 1.04, 0.58, 0.005, '#16181d', 0, 0.58, -0.017);
+            for (const x of [-0.35, 0.35]) {
+                box(g, 0.66, 0.3, 0.008, c.front, x, 0.06, 0.214);
+                box(g, 0.12, 0.02, 0.02, c.handle, x, 0.18, 0.226);
+            }
         },
     },
     plant: {
@@ -160,6 +186,16 @@ const FURNITURE = {
             cyl(g, 0.052, 0.052, 0.004, c.drink, 0, 0.13, 0, 20);
             const handle = addMesh(g, new THREE.TorusGeometry(0.035, 0.011, 8, 16, Math.PI), c.main, 0.058, 0.065, 0);
             handle.rotation.z = -Math.PI / 2;
+        },
+    },
+    tv: {
+        name: 'テレビ', icon: '📺', size: [2, 1], small: true, prefer: 'tvstand', tags: ['小物', '家電', 'リビング'],
+        slots: [['main', '本体', '#2b2b2e']],
+        build(g, c) {
+            box(g, 0.3, 0.03, 0.18, c.main, 0, 0, 0);
+            box(g, 0.05, 0.12, 0.03, c.main, 0, 0.03, -0.02);
+            box(g, 0.96, 0.58, 0.04, c.main, 0, 0.13, -0.02);
+            box(g, 0.92, 0.54, 0.005, '#16181d', 0, 0.15, 0.0025);
         },
     },
     bookstack: {
@@ -300,6 +336,16 @@ for (const def of Object.values(FURNITURE)) {
 }
 
 // ---------- 形を作る小さな関数 ----------
+// 本棚の枠・背板・棚板。本を並べる幅などを返す
+function bookshelfFrame(g, c) {
+    const W = 0.94, D = 0.4, H = 1.8, z = -0.04;
+    box(g, 0.03, H, D, c.main, -W / 2 + 0.015, 0, z);
+    box(g, 0.03, H, D, c.main, W / 2 - 0.015, 0, z);
+    box(g, W + 0.01, 0.03, D + 0.01, c.main, 0, H, z);
+    box(g, W - 0.064, H - 0.01, 0.02, c.back, 0, 0.005, z - D / 2 + 0.012);
+    for (let i = 0; i < 4; i++) box(g, W - 0.062, 0.03, D - 0.004, c.main, 0, i * 0.44, z + 0.002);
+    return { W, D, z };
+}
 const materialCache = new Map();
 function mat(color) {
     if (!materialCache.has(color)) materialCache.set(color, new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
@@ -360,6 +406,7 @@ function makeDefaultGame() {
             { uid: 3, type: 'plant', gx: 11, gz: 0, rot: 0, colors: {} },
             { uid: 4, type: 'sofa', gx: 4, gz: 9, rot: 2, colors: {} },
         ],
+        snap: true, // true: マス目にそろえる、false: 自由に置く
         floor: { pattern: 'wood', color: null }, // color: null は柄の元の色
         wall: { pattern: 'plain', color: null },
         recentColors: [],
@@ -391,10 +438,27 @@ function sanitizeItems(list) {
     return list
         .filter(it => it && FURNITURE[it.type] && Number.isInteger(it.uid) && !seen.has(it.uid) && seen.add(it.uid))
         .map(it => {
-            const item = { uid: it.uid, type: it.type, gx: toInt(it.gx), gz: toInt(it.gz), rot: ((toInt(it.rot) % 4) + 4) % 4, colors: sanitizeColors(it.type, it.colors, it.color) };
+            const item = { uid: it.uid, type: it.type, gx: toNum(it.gx), gz: toNum(it.gz), rot: ((toInt(it.rot) % 4) + 4) % 4, colors: sanitizeColors(it.type, it.colors, it.color) };
             clampItem(item);
             return item;
         });
+}
+// v0.4.0 まではテレビ台にテレビが付いていた。テレビを小物として台の真ん中に載せる
+function splitTv(list) {
+    if (!Array.isArray(list)) return list;
+    let next = list.reduce((m, it) => Math.max(m, Number.isInteger(it?.uid) ? it.uid : 0), 0) + 1;
+    const out = [];
+    for (const it of list) {
+        out.push(it);
+        if (!it || it.type !== 'tvstand') continue;
+        const rot = ((toInt(it.rot) % 4) + 4) % 4;
+        const [fw, fd] = rot % 2 ? [1, 3] : [3, 1], [tw, td] = rot % 2 ? [1, 2] : [2, 1];
+        const tv = { uid: next++, type: 'tv', gx: toNum(it.gx) + (fw - tw) / 2, gz: toNum(it.gz) + (fd - td) / 2, rot, colors: {} };
+        const old = normHex(it.colors?.tv);
+        if (old) tv.colors.main = old;
+        out.push(tv);
+    }
+    return out;
 }
 function sanitizeSurface(v, patterns, fallback) {
     const pattern = v && patterns[v.pattern] ? v.pattern : fallback;
@@ -437,7 +501,9 @@ function loadGame() {
         return;
     }
     if (['auto', 'light', 'dark'].includes(p.appearance)) game.appearance = p.appearance;
-    if (Array.isArray(p.items)) game.items = sanitizeItems(p.items);
+    const oldTv = !(Number(p.saveVersion) >= 3);
+    if (Array.isArray(p.items)) game.items = sanitizeItems(oldTv ? splitTv(p.items) : p.items);
+    game.snap = p.snap !== false;
     const maxUid = game.items.reduce((m, it) => Math.max(m, it.uid), 0);
     game.nextUid = Math.max(toInt(p.nextUid), maxUid + 1);
     game.floor = sanitizeSurface(p.floor, FLOOR_PATTERNS, 'wood');
@@ -449,7 +515,7 @@ function loadGame() {
             .filter(ps => ps && Number.isInteger(ps.id) && !ids.has(ps.id) && ids.add(ps.id))
             .map(ps => ({
                 id: ps.id, name: String(ps.name || 'プリセット').slice(0, 30), savedAt: Number(ps.savedAt) || 0,
-                items: sanitizeItems(ps.items),
+                items: sanitizeItems(oldTv ? splitTv(ps.items) : ps.items),
                 floor: sanitizeSurface(ps.floor, FLOOR_PATTERNS, 'wood'),
                 wall: sanitizeSurface(ps.wall, WALL_PATTERNS, 'plain'),
             }))
@@ -460,6 +526,7 @@ function loadGame() {
     game.saveVersion = SAVE_VERSION;
 }
 function toInt(v) { const n = Math.round(Number(v)); return Number.isFinite(n) ? n : 0; }
+function toNum(v) { const n = Number(v); return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0; } // 自由に置いた位置（1/100 マスまで）
 
 // ---------- 配置の計算 ----------
 // 壁掛けは rot = 掛けている壁（walls の番号）、gx = 壁に沿った位置（マス）、gz = 下端の高さ（WALL_STEP 単位）
@@ -486,6 +553,9 @@ function wallOverlaps(a, b) {
     return a.rot === b.rot && a.gx < b.gx + db.size[0] && b.gx < a.gx + da.size[0]
         && a.gz * WALL_STEP < b.gz * WALL_STEP + db.height && b.gz * WALL_STEP < a.gz * WALL_STEP + da.height;
 }
+// マス目にそろえるか、自由（1cm 刻み）に置くか
+function snapCell(v) { return game.snap ? Math.round(v) : Math.round(v * 50) / 50; }
+function snapWallY(v) { return game.snap ? Math.round(v) : Math.round(v * 10) / 10; }
 function footprint(item) {
     const [w, d] = FURNITURE[item.type].size;
     return item.rot % 2 ? [d, w] : [w, d];
@@ -494,7 +564,7 @@ function clampItem(item) {
     const def = FURNITURE[item.type];
     if (def.wall) {
         item.gx = Math.min(Math.max(item.gx, 0), N - def.size[0]);
-        item.gz = Math.min(Math.max(item.gz, WALL_MIN), Math.floor((WALL_H - def.height) / WALL_STEP + 1e-6));
+        item.gz = Math.min(Math.max(item.gz, WALL_MIN), Math.floor((WALL_H - def.height) / WALL_STEP * 10 + 1e-6) / 10);
         return;
     }
     const [fw, fd] = footprint(item);
@@ -505,16 +575,25 @@ function itemCenter(item) {
     const [fw, fd] = footprint(item);
     return new THREE.Vector3((item.gx + fw / 2) * CELL - HALF, 0, (item.gz + fd / 2) * CELL - HALF);
 }
-function overlaps(a, b) {
+// shrink: それぞれ内側に縮めて比べる（小物どうしは、少しなら重なってよい）
+function overlaps(a, b, shrink = 0) {
     const [aw, ad] = footprint(a), [bw, bd] = footprint(b);
-    return a.gx < b.gx + bw && b.gx < a.gx + aw && a.gz < b.gz + bd && b.gz < a.gz + ad;
+    const E = 1e-6 + shrink * 2;
+    return a.gx + E < b.gx + bw && b.gx + E < a.gx + aw && a.gz + E < b.gz + bd && b.gz + E < a.gz + ad;
+}
+function centerCell(item) {
+    const [w, d] = footprint(item);
+    return [item.gx + w / 2, item.gz + d / 2];
 }
 // 小物の下にある、上に物を置ける家具（いちばん高いもの）
 function supportOf(item) {
     let best = null;
     for (const o of game.items) {
         const d = FURNITURE[o.type];
-        if (o.uid === item.uid || !d.top || kindOf(o) !== 'floor' || !overlaps(item, o)) continue;
+        if (o.uid === item.uid || !d.top || kindOf(o) !== 'floor') continue;
+        // 小物の真ん中が天面の上にあれば載る
+        const [cx, cz] = centerCell(item), [w, dd] = footprint(o);
+        if (!(cx > o.gx && cx < o.gx + w && cz > o.gz && cz < o.gz + dd)) continue;
         if (!best || d.top > FURNITURE[best.type].top) best = o;
     }
     return best;
@@ -532,13 +611,15 @@ function isBlocked(item) {
     const kind = kindOf(item);
     if (kind === 'flat') return false;
     if (kind === 'wall') return game.items.some(o => o.uid !== item.uid && kindOf(o) === 'wall' && wallOverlaps(item, o));
+    const support = kind === 'small' ? supportOf(item) : null;
     return game.items.some(o => {
         if (o.uid === item.uid) return false;
         const k = kindOf(o);
-        if (k === 'flat' || k === 'wall' || !overlaps(item, o)) return false;
-        if (kind === 'floor') return k === 'floor';
-        // 小物: ほかの小物や、上に置けない家具とは重ねられない
-        return k === 'small' || !FURNITURE[o.type].top;
+        if (k === 'flat' || k === 'wall') return false;
+        if (kind === 'floor') return k === 'floor' && overlaps(item, o);
+        // 小物: ほかの小物と大きく重なる、または載っていない家具にめり込む
+        if (k === 'small') return overlaps(item, o, 0.2);
+        return o !== support && overlaps(item, o);
     });
 }
 // 部屋の中心に近い、空いている場所を探す
@@ -557,6 +638,7 @@ function findFreeSpot(item) {
                 const s = supportOf(cand);
                 if (!s) dist += 500;
                 else if (FURNITURE[s.type].top > 1.2) dist += 1000;
+                else if (def.prefer === s.type) dist -= 2000; // テレビはテレビ台の上を先に
             }
             if (dist < bestDist) { bestDist = dist; best = { gx, gz }; }
         }
@@ -911,7 +993,7 @@ function select(uid) {
     selectedUid = uid;
     const item = findItem(uid);
     toolbar.hidden = !item;
-    grid.visible = !!item;
+    grid.visible = !!item && game.snap;
     if (item) {
         selName.textContent = FURNITURE[item.type].name;
         document.getElementById('rotate-btn').hidden = kindOf(item) === 'wall';
@@ -959,16 +1041,24 @@ function rotateSelected() {
     const cx = item.gx + fw / 2, cz = item.gz + fd / 2;
     item.rot = (item.rot + 1) % 4;
     const [nw, nd] = footprint(item);
-    item.gx = Math.round(cx - nw / 2);
-    item.gz = Math.round(cz - nd / 2);
+    item.gx = snapCell(cx - nw / 2);
+    item.gz = snapCell(cz - nd / 2);
     clampItem(item);
-    // 上の小物もいっしょに回す（中心のまわりに 90°）
+    // 上の小物もいっしょに回す（中心のまわりに 90°）。真ん中が天面から外れないようにする
     const ncx = item.gx + nw / 2, ncz = item.gz + nd / 2;
+    const inside = (v, lo, len) => Math.min(Math.max(v, lo + 0.05), lo + len - 0.05);
     for (const r of riders) {
-        const rx = r.gx + 0.5 - cx, rz = r.gz + 0.5 - cz;
-        r.gx = Math.min(Math.max(Math.round(ncx - rz - 0.5), item.gx), item.gx + nw - 1);
-        r.gz = Math.min(Math.max(Math.round(ncz + rx - 0.5), item.gz), item.gz + nd - 1);
+        const [rcx, rcz] = centerCell(r);
+        const rx = rcx - cx, rz = rcz - cz;
         r.rot = (r.rot + 1) % 4;
+        const [rw, rd] = footprint(r);
+        r.gx = snapCell(inside(ncx - rz, item.gx, nw) - rw / 2);
+        r.gz = snapCell(inside(ncz + rx, item.gz, nd) - rd / 2);
+        if (!(supportOf(r) === item)) { // マス目にそろえたら外れたとき
+            r.gx = inside(ncx - rz, item.gx, nw) - rw / 2;
+            r.gz = inside(ncz + rx, item.gz, nd) - rd / 2;
+        }
+        clampItem(r);
         placeObject(r);
     }
     placeObject(item);
@@ -987,6 +1077,21 @@ function removeSelected() {
 }
 
 document.getElementById('rotate-btn').addEventListener('click', rotateSelected);
+// マス目にそろえる／自由に置く
+const snapBtn = document.getElementById('snap-btn');
+function updateSnapButton() {
+    snapBtn.textContent = game.snap ? '▦ マス目' : '✥ 自由';
+    snapBtn.setAttribute('aria-pressed', String(!game.snap));
+    snapBtn.title = game.snap ? 'いまはマス目にそろえて置きます（押すと自由に置けます）' : 'いまは自由に置けます（押すとマス目にそろえます）';
+}
+snapBtn.addEventListener('click', () => {
+    game.snap = !game.snap;
+    updateSnapButton();
+    grid.visible = !!findItem(selectedUid) && game.snap;
+    requestRender();
+    saveGame();
+    toast(game.snap ? 'マス目にそろえて置きます' : '自由に置けます（1cm 刻み）');
+});
 document.getElementById('remove-btn').addEventListener('click', removeSelected);
 document.getElementById('done-btn').addEventListener('click', () => select(null));
 window.addEventListener('keydown', (e) => {
@@ -1116,8 +1221,8 @@ canvas.addEventListener('pointermove', (e) => {
         const p = floorPoint(e.clientX, e.clientY, gesture.height);
         if (!p) return;
         const [fw, fd] = footprint(item);
-        const gx = Math.round((p.x + gesture.offX + HALF) / CELL - fw / 2);
-        const gz = Math.round((p.z + gesture.offZ + HALF) / CELL - fd / 2);
+        const gx = snapCell((p.x + gesture.offX + HALF) / CELL - fw / 2);
+        const gz = snapCell((p.z + gesture.offZ + HALF) / CELL - fd / 2);
         if (gx !== item.gx || gz !== item.gz) {
             item.gx = gx; item.gz = gz;
             clampItem(item);
@@ -1142,8 +1247,8 @@ function dragOnWall(item, e) {
     } else h = wallPoint(e.clientX, e.clientY, item.rot);
     if (!h) return;
     const w = FURNITURE[item.type].size[0];
-    const gx = Math.round((h.a + gesture.offA + HALF) / CELL - w / 2);
-    const gz = Math.round((h.p.y + gesture.offY) / WALL_STEP);
+    const gx = snapCell((h.a + gesture.offA + HALF) / CELL - w / 2);
+    const gz = snapWallY((h.p.y + gesture.offY) / WALL_STEP);
     item.gx = gx; item.gz = gz;
     clampItem(item);
     placeObject(item);
@@ -1871,6 +1976,7 @@ rebuildAll();
 applySurfaces();
 recordHistory(); // 起動したときの部屋を「元に戻す」の起点にする
 updateHistoryButtons();
+updateSnapButton();
 updateCamera();
 resize();
 document.getElementById('version').textContent = `v${APP_VERSION}`;
@@ -1909,7 +2015,7 @@ function findCoplanarFaces() {
 
 // テストから使う
 window.__lifemaker = {
-    findCoplanarFaces, testBox: box, save: saveGame, smallBase, kindOf, walls: () => walls.map(w => !w.hidden), updateCamera, rebuildAll,
+    findCoplanarFaces, testBox: box, supportOf, splitTv, save: saveGame, smallBase, kindOf, walls: () => walls.map(w => !w.hidden), updateCamera, rebuildAll,
     viewShift: () => viewShift, visibleOf: (uid) => objects.get(uid).visible,
     meshColors: (uid) => { const s = new Set(); objects.get(uid).traverse(o => { if (o.isMesh) s.add('#' + o.material.color.getHexString()); }); return [...s]; },
     game: () => game, selected: () => selectedUid, cam, addItem, savePreset, loadPreset, openColorDialog, setHsl, hslOf, undo, redo, showTab, history: () => ({ undo: undoStack.length, redo: redoStack.length }), hslToHex, filter, rotateSelected, removeSelected, select, isBlocked, footprint, APP_VERSION, FURNITURE,
