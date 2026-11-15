@@ -233,7 +233,7 @@ await test('名前・タグで家具を絞り込める', async () => {
     await evaluate(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
     await evaluate(`[...document.querySelectorAll('#tags .tag')].find(b => b.textContent === '収納').click()`);
     const n = await count();
-    assert(n === 3, `収納のタグで 3 つにならない: ${n}`);
+    assert(n === 4, `収納のタグで 4 つにならない: ${n}`);
     await evaluate(`(() => { const s = document.getElementById('search'); s.value = 'zzz'; s.dispatchEvent(new Event('input')); })()`);
     assert(await count() === 0 && await evaluate(`!!document.querySelector('#items .empty')`), '見つからないときの表示がない');
     await evaluate(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
@@ -331,6 +331,110 @@ await test('家具の部品の面がぴったり重なっていない（チラ�
         F.zz_old = { ...F.wardrobe, build: (g, c) => { L.testBox(g, 0.94, 1.9, 0.46, c.main, 0, 0, -0.01); L.testBox(g, 0.94, 0.08, 0.46, c.main, 0, 0, -0.01); } };
         const r = L.findCoplanarFaces(); delete F.zz_old; return r; })()`);
     assert(old.some(x => x.startsWith('zz_old')), '古いクローゼットの重なりを見つけられない');
+});
+
+await test('小物は家具の上に載り、家具といっしょに動く・回る', async () => {
+    await evaluate(`document.querySelector('#items .item[data-type="table"]').click()`);
+    const t = await L('L.selected()');
+    await evaluate(`document.querySelector('#items .item[data-type="mug"]').click()`);
+    const m = await L('L.selected()');
+    assert(await L(`L.kindOf(L.game().items.find(i => i.uid === ${m}))`) === 'small', '小物になっていない');
+    assert(await L(`L.smallBase(L.game().items.find(i => i.uid === ${m}))`) > 0.3, '小物が家具の上に置かれない');
+    // テーブルの角のマスに載せる
+    await L(`(() => { const g = L.game(); const tb = g.items.find(i => i.uid === ${t}), mg = g.items.find(i => i.uid === ${m}); mg.gx = tb.gx; mg.gz = tb.gz; L.rebuildAll(); L.select(${t}); })()`);
+    const h = await L(`L.smallBase(L.game().items.find(i => i.uid === ${m}))`);
+    assert(Math.abs(h - 0.732) < 0.001, `テーブルの天面の高さにならない: ${h}`);
+    const before = await L(`(() => { const g = L.game(); const tb = g.items.find(i => i.uid === ${t}), mg = g.items.find(i => i.uid === ${m}); return { dx: mg.gx - tb.gx, dz: mg.gz - tb.gz, tgx: tb.gx, tgz: tb.gz }; })()`);
+    const p = await L(`L.screenOf(${t}, 0.73)`);
+    await dragMouse(p, { x: p.x - 50, y: p.y + 35 }, 10);
+    const after = await L(`(() => { const g = L.game(); const tb = g.items.find(i => i.uid === ${t}), mg = g.items.find(i => i.uid === ${m}); return { dx: mg.gx - tb.gx, dz: mg.gz - tb.gz, tgx: tb.gx, tgz: tb.gz }; })()`);
+    assert(after.tgx !== before.tgx || after.tgz !== before.tgz, 'テーブルが動かない');
+    assert(after.dx === before.dx && after.dz === before.dz, `小物がいっしょに動かない: ${JSON.stringify([before, after])}`);
+    // 回すと、小物もテーブルの上に残る
+    await evaluate(`document.getElementById('rotate-btn').click()`);
+    const r = await L(`(() => { const g = L.game(); const tb = g.items.find(i => i.uid === ${t}), mg = g.items.find(i => i.uid === ${m}); const [w, d] = L.footprint(tb); return { inside: mg.gx >= tb.gx && mg.gx < tb.gx + w && mg.gz >= tb.gz && mg.gz < tb.gz + d, h: L.smallBase(mg) }; })()`);
+    assert(r.inside && r.h > 0.7, `回したら小物が落ちた: ${JSON.stringify(r)}`);
+    // テーブルをしまうと床に下り、戻すと上に戻る
+    await evaluate(`document.getElementById('remove-btn').click()`);
+    assert(await L(`L.smallBase(L.game().items.find(i => i.uid === ${m}))`) === 0, 'しまったのに小物が浮いている');
+    await evaluate(`document.getElementById('undo-btn').click()`);
+    assert(await L(`L.smallBase(L.game().items.find(i => i.uid === ${m}))`) > 0.7, '戻したのに小物が上に戻らない');
+});
+
+await test('壁掛けは見えている壁に掛かり、壁に沿って動かせる', async () => {
+    await evaluate(`document.querySelector('#items .item[data-type="picture"]').click()`);
+    const uid = await L('L.selected()');
+    let it = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
+    assert((await L('L.walls()'))[it.rot], '隠れた壁に掛かった');
+    assert(await evaluate(`document.getElementById('rotate-btn').hidden`), '壁掛けに回転ボタンが出ている');
+    assert(!(await L(`L.isBlocked(L.game().items.find(i => i.uid === ${uid}))`)), 'ほかの壁掛けと重なっている');
+    await evaluate(`document.querySelector('#items .item[data-type="wallclock"]').click()`);
+    const c = await L('L.selected()');
+    assert(!(await L(`L.isBlocked(L.game().items.find(i => i.uid === ${c}))`)), '2 つ目の壁掛けが重なった');
+    await L(`L.select(${uid})`);
+    const p = await L(`L.screenOf(${uid}, 0.35)`);
+    await dragMouse(p, { x: p.x + 6, y: p.y - 45 }, 10);
+    const moved = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
+    assert(moved.gz > it.gz, `上に動かない: ${it.gz} → ${moved.gz}`);
+    assert(moved.gz * 0.1 + 0.7 <= 2.6 + 1e-9, '天井を突き抜けた');
+    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save')).items.find(i => i.uid === ${uid})`);
+    assert(saved.gz === moved.gz && saved.rot === moved.rot, '動かした位置が保存されていない');
+    // 部屋を回して、その壁が隠れたら壁掛けも隠れる
+    const az = await L('L.cam.azimuth');
+    await L('(L.cam.azimuth += Math.PI, L.updateCamera())');
+    assert(!(await L(`L.visibleOf(${uid})`)), '隠れた壁の壁掛けが見えている');
+    await L(`(L.cam.azimuth = ${az}, L.updateCamera())`);
+    assert(await L(`L.visibleOf(${uid})`), '壁が戻ったのに壁掛けが見えない');
+    await evaluate(`document.getElementById('done-btn').click()`);
+});
+await shot('04_wall_small');
+
+await test('本棚の本は何冊かずつまとめて色が変わる', async () => {
+    await evaluate(`document.querySelector('#items .item[data-type="bookshelf"]').click()`);
+    const uid = await L('L.selected()');
+    await evaluate(`document.getElementById('color-btn').click()`);
+    const parts = await evaluate(`[...document.querySelectorAll('#color-dialog .cd-part')].map(b => b.textContent)`);
+    assert(JSON.stringify(parts) === JSON.stringify(['本棚', '背板', '本 1', '本 2', '本 3']), `部位が違う: ${parts}`);
+    await evaluate(`document.querySelectorAll('#color-dialog .cd-part')[2].click()`);
+    await evaluate(`document.querySelectorAll('#color-dialog .cd-palette .cswatch')[12].click()`);
+    const cs = await L(`L.game().items.find(i => i.uid === ${uid}).colors`);
+    assert(cs.books1 === '#d9534f', `本 1 の色が変わらない: ${JSON.stringify(cs)}`);
+    const colors = await L(`L.meshColors(${uid})`);
+    assert(colors.includes('#d9534f') && !colors.includes('#c45c4a'), `本の色が変わっていない: ${colors}`);
+    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
+    await sleep(300);
+});
+
+await test('色の画面を開いてもカメラは動かず、隠れるときだけ少しずらす', async () => {
+    const target = await L('L.cam.target.toArray()');
+    const az = await L('L.cam.azimuth');
+    // 画面の上のほうにある家具（隠れない）
+    const sel = await L(`(() => { const g = L.game(); let best = null, by = Infinity; for (const it of g.items) { if (L.kindOf(it) !== 'floor') continue; const y = L.screenOf(it.uid, 0).y; if (y < by) { by = y; best = it.uid; } } return best; })()`);
+    await L(`L.select(${sel})`);
+    await evaluate(`document.getElementById('color-btn').click()`);
+    await sleep(400);
+    assert(await L('L.viewShift()') === 0, `隠れない家具なのにずれた: ${await L('L.viewShift()')}`);
+    assert(JSON.stringify(await L('L.cam.target.toArray()')) === JSON.stringify(target) && await L('L.cam.azimuth') === az, 'カメラが動いた');
+    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
+    await sleep(400);
+    // 画面のいちばん下の家具（シートに隠れる）
+    const low = await L(`(() => { const g = L.game(); let best = null, by = -Infinity; for (const it of g.items) { if (L.kindOf(it) !== 'floor') continue; const y = L.screenOf(it.uid, 0).y; if (y > by) { by = y; best = it.uid; } } return best; })()`);
+    await L(`L.select(${low})`);
+    await evaluate(`document.getElementById('color-btn').click()`);
+    await sleep(400);
+    const shift = await L('L.viewShift()');
+    const h = await evaluate(`document.getElementById('view').clientHeight`);
+    assert(shift > 0 && shift <= h * 0.45 + 0.5, `隠れる家具なのにずれない、またはずれすぎ: ${shift} / ${h}`);
+    const top1 = await evaluate(`document.getElementById('color-dialog').getBoundingClientRect().top`);
+    await evaluate(`document.querySelectorAll('#color-dialog .cd-part')[1]?.click()`);
+    const top2 = await evaluate(`document.getElementById('color-dialog').getBoundingClientRect().top`);
+    assert(top1 === top2, `部位を切り替えたら画面の上端が動いた: ${top1} → ${top2}`);
+    await shot('05_color_low');
+    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
+    await sleep(400);
+    assert(await L('L.viewShift()') === 0, '閉じたのにずれたまま');
+    assert(JSON.stringify(await L('L.cam.target.toArray()')) === JSON.stringify(target), 'カメラが動いた');
+    await L('L.select(null)');
 });
 
 await test('しまうと消える', async () => {
