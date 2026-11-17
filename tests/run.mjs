@@ -116,7 +116,7 @@ await test('起動して版・一覧・最初の部屋が出る', async () => {
     const qs = [...html.matchAll(/\?v=([\d.]+)/g)].map(m => m[1]);
     assert(qs.length >= 2 && qs.every(q => q === v), `?v= が APP_VERSION とそろっていない: ${qs} / ${v}`);
     assert(await evaluate(`document.querySelectorAll('#items .item').length`) === await L('Object.keys(L.FURNITURE).length'), '家具の一覧の数が違う');
-    assert(await L('L.game().items.length') === 5, '最初の家具が 5 つない');
+    assert(await L('L.game().items.length') === 7, '最初の家具が 7 つない');
     assert(await L('L.game().items.every(it => !L.isBlocked(it))'), '最初の家具が重なっている');
     const broken = await evaluate(`[...document.querySelectorAll('#items img')].filter(i => !i.complete || !i.naturalWidth).length`);
     assert(broken === 0, '一覧の絵が読めていない');
@@ -124,9 +124,10 @@ await test('起動して版・一覧・最初の部屋が出る', async () => {
 await shot('01_phone');
 
 await test('家具を一覧から置ける（空いている場所に置かれ、選ばれる）', async () => {
+    const n0 = await L('L.game().items.length');
     await evaluate(`document.querySelector('#items .item[data-type="plant"]').click()`);
     const r = await L(`(() => { const g = L.game(); const it = g.items[g.items.length - 1]; return { n: g.items.length, type: it.type, sel: L.selected() === it.uid, blocked: L.isBlocked(it), bar: !document.getElementById('toolbar').hidden }; })()`);
-    assert(r.n === 6 && r.type === 'plant', '置かれていない');
+    assert(r.n === n0 + 1 && r.type === 'plant', '置かれていない');
     assert(r.sel && r.bar, '置いた家具が選ばれていない');
     assert(!r.blocked, 'ほかの家具と重なる場所に置かれた');
 });
@@ -134,8 +135,8 @@ await test('家具を一覧から置ける（空いている場所に置かれ�
 await test('家具をドラッグで動かせて、保存される', async () => {
     const uid = await L('L.selected()');
     const before = await item(uid);
-    const p = await L(`L.screenOf(${uid}, 0.6)`);
-    assert(await L(`L.pickAt(${p.x}, ${p.y})`) === uid, '家具を押しても選べない');
+    const p = await L(`L.visiblePoint(${uid})`);
+    assert(p, '家具の見えている所がない');
     await dragMouse(p, { x: p.x + 40, y: p.y + 25 });
     const after = await item(uid);
     assert(after.gx !== before.gx || after.gz !== before.gz, '位置が変わらない');
@@ -145,9 +146,9 @@ await test('家具をドラッグで動かせて、保存される', async () =>
 
 await test('絵の透明な所を押しても家具は選ばれない', async () => {
     await L('L.select(null)');
-    const p = await L(`L.screenOf(2, 0.3)`);
+    const p = await L(`L.screenOf(2, 0.6)`);
     // ベッド（uid 2）の絵の四角の左上の角あたりは透明
-    const corner = await L(`(() => { const s = L.screenOf(2, 1.2); return { x: s.x - 45, y: s.y - 15 }; })()`);
+    const corner = await L(`(() => { const s = L.screenOf(2, 0.05); return { x: s.x - 45, y: s.y }; })()`);
     assert(await L(`L.pickAt(${p.x}, ${p.y})`) === 2, 'ベッドの真ん中で選べない');
     assert(await L(`L.pickAt(${corner.x}, ${corner.y})`) !== 2, '透明な所でベッドが選ばれた');
 });
@@ -230,6 +231,90 @@ await test('部屋をプリセットに保存して呼び出せる', async () =>
     assert(await L('L.game().items.length') === n, '呼び出しで戻らない');
 });
 
+await test('小物は家具の上に載り、家具といっしょに動く・回る', async () => {
+    await evaluate(`document.querySelector('#items .item[data-type="tvstand"]').click()`);
+    const stand = await L('L.selected()');
+    await evaluate(`document.querySelector('#items .item[data-type="tv"]').click()`);
+    const tv = await L('L.selected()');
+    assert(await L(`L.supportOf(${tv})`) === stand, 'テレビがテレビ台の上に置かれない');
+    assert(!(await L(`L.isBlocked(L.game().items.find(i => i.uid === ${tv}))`)), '台の上なのに重なり判定された');
+    // テレビ台をドラッグすると、テレビもついてくる
+    await L(`L.select(null)`);
+    const before = await item(tv), standBefore = await item(stand);
+    const p = await L(`L.visiblePoint(${stand})`);
+    assert(p, 'テレビ台の見えている所がない');
+    await dragMouse(p, { x: p.x - 40, y: p.y + 25 });
+    const standAfter = await item(stand);
+    assert(standAfter.gx !== standBefore.gx || standAfter.gz !== standBefore.gz, `テレビ台が動かない: ${JSON.stringify(standAfter)}`);
+    const after = await item(tv);
+    assert(after.gx !== before.gx || after.gz !== before.gz, 'テレビがついてこない');
+    assert(await L(`L.supportOf(${tv})`) === stand, '動かしたあと台から落ちた');
+    // 向きを変えても、台の上に載ったまま
+    await L(`L.select(${stand})`);
+    await L('L.rotateSelected()');
+    assert(await L(`L.supportOf(${tv})`) === stand, '向きを変えたら台から落ちた');
+    assert((await item(tv)).rot === (await item(stand)).rot, 'テレビの向きが台とそろっていない');
+    const order = await L('(L.render(), L.drawOrder())');
+    assert(order.indexOf(tv) === order.indexOf(stand) + 1, `台のすぐ後に描かれていない: ${order}`);
+    await shot('small_items');
+    await L(`L.select(${tv})`); await L('L.removeSelected()');
+    await L(`L.select(${stand})`); await L('L.removeSelected()');
+});
+
+await test('壁掛けは壁に沿って動き、反対の壁に掛け替えられる', async () => {
+    await L('L.select(null)');
+    const before = await item(7); // 左奥の壁の絵
+    assert(before.rot === 1, '絵が左奥の壁にない');
+    const p = await L(`L.screenOf(7, 0.5)`);
+    assert(await L(`L.pickAt(${p.x}, ${p.y})`) === 7, '絵を押しても選べない');
+    await dragMouse(p, { x: p.x - 30, y: p.y + 30 });
+    const moved = await item(7);
+    assert(moved.rot === 1 && (moved.gx !== before.gx || moved.y !== before.y), `壁に沿って動かない: ${JSON.stringify(moved)}`);
+    // 画面の右側まで動かすと、右奥の壁に掛け替わる
+    const q = await L(`L.screenOf(7, 0.5)`);
+    const center = await L(`(() => { const c = document.getElementById('scene').getBoundingClientRect(); return c.left + c.width / 2; })()`);
+    await dragMouse(q, { x: center + 60, y: q.y - 20 }, 12);
+    const swapped = await item(7);
+    assert(swapped.rot === 0, `右奥の壁に掛け替わらない: ${JSON.stringify(swapped)}`);
+    assert(swapped.gx >= 0 && swapped.gx <= 8 && swapped.y >= 0.15 && swapped.y < 2.5, `壁からはみ出した: ${JSON.stringify(swapped)}`);
+    await L('L.select(7)');
+    await evaluate(`document.getElementById('rotate-btn').click()`);
+    assert((await item(7)).rot === 1, '「反対の壁」で戻らない');
+});
+
+await test('家具の色合いを変えて保存し、元の色に戻せる', async () => {
+    await L('L.select(null)');
+    await L('L.render()');
+    const at = await L(`L.screenOf(4, 0.55)`); // ソファ
+    const px0 = await L(`L.pixelAt(${at.x}, ${at.y})`);
+    await L('L.select(4)');
+    await evaluate(`document.getElementById('color-btn').click()`);
+    assert(await evaluate(`document.getElementById('tint-dialog').open`), '色合いの画面が開かない');
+    assert(await evaluate(`document.querySelectorAll('#tint-presets button').length`) >= 8, '見本が出ていない');
+    // ソファが色合いの画面に隠れていない
+    const shown = await L(`(() => { const p = L.screenOf(4, 0.5); return p.y < document.getElementById('tint-dialog').getBoundingClientRect().top; })()`);
+    assert(shown, 'ソファが色合いの画面に隠れている');
+    await evaluate(`(() => { const i = document.getElementById('tint-h'); i.value = 150; i.dispatchEvent(new Event('input')); i.dispatchEvent(new Event('change')); })()`);
+    await sleep(100);
+    await L('L.render()');
+    const px1 = await L(`L.pixelAt(${at.x}, ${at.y})`);
+    assert(Math.abs(px1[0] - px0[0]) + Math.abs(px1[1] - px0[1]) + Math.abs(px1[2] - px0[2]) > 30, `色が変わらない: ${px0} → ${px1}`);
+    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker2d_save')).items.find(i => i.uid === 4).tint`);
+    assert(saved && saved.h === 150, `保存されていない: ${JSON.stringify(saved)}`);
+    await shot('tint');
+    // 見本のボタンで選ぶ
+    await evaluate(`[...document.querySelectorAll('#tint-presets button')].find(b => b.textContent === 'モノクロ').click()`);
+    assert((await item(4)).tint?.s === 0, 'モノクロにならない');
+    await evaluate(`document.getElementById('tint-reset').click()`);
+    assert(!(await item(4)).tint, '元の色に戻らない');
+    const cyOpen = await L('L.view.cy');
+    await evaluate(`document.getElementById('tint-close').click()`);
+    assert(await L('L.view.cy') !== cyOpen, '閉じても部屋の位置が戻らない');
+    await L('L.undo()');
+    assert((await item(4)).tint?.s === 0, '元に戻すで色合いが戻らない');
+    await L('L.redo()');
+});
+
 await test('しまうと消える', async () => {
     await L('L.select(3)');
     await evaluate(`document.getElementById('remove-btn').click()`);
@@ -247,7 +332,7 @@ await test('壊れたセーブでも起動する', async () => {
     await clearSave();
     await evaluate(`localStorage.setItem('lifemaker2d_save', '{broken')`);
     await open();
-    assert(await L('L.game().items.length') === 5, '初期の部屋で起動しない');
+    assert(await L('L.game().items.length') === 7, '初期の部屋で起動しない');
     assert(await evaluate(`localStorage.getItem('lifemaker2d_save_corrupted') === '{broken'`), '壊れたデータが退避されていない');
 });
 
@@ -258,7 +343,8 @@ await test('おかしな値のセーブを直して読む', async () => {
     ], resident: { show: false, name: '  なまえがとてもながいなまえです  ' }, presets: 'x' }))`);
     await open();
     const g = await L('L.game()');
-    assert(g.items.length === 2, `数が違う: ${g.items.length}`);
+    // v0.8 までのセーブには窓と絵がないので、元の場所に掛けて読む
+    assert(g.items.length === 4 && g.items.some(i => i.type === 'window') && g.items.some(i => i.type === 'picture'), `数が違う: ${g.items.map(i => i.type)}`);
     const sofa = g.items.find(i => i.type === 'sofa');
     assert(sofa.rot === 1 && sofa.gx === 8 && sofa.gz === 0, `はみ出しが直っていない: ${JSON.stringify(sofa)}`);
     assert(g.resident.show === false && g.resident.name === 'なまえがとてもながいなま', `住人の設定: ${JSON.stringify(g.resident)}`);

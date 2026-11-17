@@ -20,7 +20,7 @@
 <meta property="og:image:height" content="512">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="css/style.css?v=0.8.2">
+<link rel="stylesheet" href="css/style.css?v=0.9.0">
 </head>
 <body>
 <div id="app">
@@ -44,6 +44,7 @@
             <div id="toolbar" hidden>
                 <span id="sel-name"></span>
                 <button id="rotate-btn">⇆ 向き</button>
+                <button id="color-btn">🎨 色</button>
                 <button id="remove-btn">しまう</button>
                 <button id="done-btn">完了</button>
             </div>
@@ -75,6 +76,19 @@
     <button id="menu-close" class="primary">閉じる</button>
 </dialog>
 
+<dialog id="tint-dialog" class="sheet">
+    <h2><span id="tint-name"></span>の色合い</h2>
+    <div id="tint-presets" class="tint-presets" role="group" aria-label="よく使う色合い"></div>
+    <div class="tint-row"><label for="tint-h">色合い</label><output id="tint-h-val"></output><input id="tint-h" type="range" min="-180" max="180" step="1" class="tint-hue"></div>
+    <div class="tint-row"><label for="tint-s">鮮やかさ</label><output id="tint-s-val"></output><input id="tint-s" type="range" min="0" max="200" step="1"></div>
+    <div class="tint-row"><label for="tint-l">明るさ</label><output id="tint-l-val"></output><input id="tint-l" type="range" min="50" max="150" step="1"></div>
+    <div class="tint-actions">
+        <button id="tint-revert">開いたときに戻す</button>
+        <button id="tint-reset">元の色</button>
+        <button id="tint-close" class="primary">閉じる</button>
+    </div>
+</dialog>
+
 <dialog id="preset-dialog" class="sheet">
     <h2>部屋のプリセット</h2>
     <div class="preset-new">
@@ -87,6 +101,6 @@
 
 <div id="toast" role="status"></div>
 
-<script type="module" src="js/app.js?v=0.8.2"></script>
+<script type="module" src="js/app.js?v=0.9.0"></script>
 </body>
 </html>

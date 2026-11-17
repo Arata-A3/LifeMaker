@@ -83,6 +83,11 @@ Background: one solid flat magenta color (#FF00FF) everywhere.
 | `picture.png` | a framed landscape painting hanging on the wall (on the left wall, facing down-right) |
 | `window.png` | a window with muted red curtains (on the back-right wall, facing down-left) |
 
+## できた絵
+
+- 住人、家具 17 種類、小物（テレビ・花びん）、壁掛け（窓 2 種・絵）
+- マグカップは、良い絵ができなかったので入れていない
+
 ## 置き場所
 
 - `art/source/`: 生成したそのままの画像（上の表のファイル名で保存）。住人の一覧表は `resident.png`。
