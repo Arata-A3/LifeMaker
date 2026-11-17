@@ -20,13 +20,14 @@
 <meta property="og:image:height" content="512">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="css/style.css?v=0.11.0">
+<link rel="stylesheet" href="css/style.css?v=0.12.0">
 </head>
 <body>
 <div id="app">
     <header>
         <h1>LifeMaker</h1>
         <div class="header-btns">
+            <button id="shop-btn" class="pill-btn" aria-haspopup="dialog">🛒 お店</button>
             <button id="preset-btn" class="pill-btn" aria-haspopup="dialog">📁 プリセット</button>
             <button id="menu-btn" class="icon-btn" aria-label="設定" aria-haspopup="dialog">⚙</button>
         </div>
@@ -36,6 +37,7 @@
         <div id="view">
             <canvas id="scene"></canvas>
             <div id="bubble" hidden></div>
+            <div id="status" aria-live="polite"><span id="coins"></span><span id="clock"></span></div>
             <div id="history">
                 <button id="undo-btn" class="round-btn" aria-label="元に戻す" title="元に戻す (Ctrl+Z)" disabled>↶</button>
                 <button id="redo-btn" class="round-btn" aria-label="やり直す" title="やり直す (Ctrl+Y)" disabled>↷</button>
@@ -129,8 +131,15 @@
     </div>
 </dialog>
 
+<dialog id="shop-dialog" class="sheet">
+    <h2>お店 <span id="shop-coins" class="shop-coins"></span></h2>
+    <p class="fit-help"><span id="shop-day"></span>。夜が明けると品物が入れかわります（ゲームの中の時計は、遊んでいる間だけ進みます）</p>
+    <div id="shop-list" class="shop-list"></div>
+    <button id="shop-close" class="wide">閉じる</button>
+</dialog>
+
 <div id="toast" role="status"></div>
 
-<script type="module" src="js/app.js?v=0.11.0"></script>
+<script type="module" src="js/app.js?v=0.12.0"></script>
 </body>
 </html>

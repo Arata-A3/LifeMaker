@@ -1,5 +1,5 @@
 // ネットワーク優先。オフラインのときだけ保存分を返す。
-const CACHE = 'lifemaker2d-v4';
+const CACHE = 'lifemaker2d-v5';
 const CORE = [
     './',
     'index.html',

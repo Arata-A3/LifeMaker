@@ -1,9 +1,9 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.11.0';
+const APP_VERSION = '0.12.0';
 const SAVE_KEY = 'lifemaker2d_save';
-const SAVE_VERSION = 3; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに
+const SAVE_VERSION = 4; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに / 4: お金・持ち物・ゲームの中の日・お店
 
 // ---------- 部屋の大きさと見え方 ----------
 // 1 マス 0.5m、N×N マス。gx は右下へ、gz は左下へ伸びる（奥の角が原点）。y は高さ（m）
@@ -47,11 +47,18 @@ const FURNITURE = {
     vase2: { name: '花びん（大）', size: [1, 1], art: 'vase2', fitHeight: 0.75, use: 'look', lines: ['いい香り', 'きれいに咲いてる'] },
     rug: { name: 'ラグ', size: [3, 4], art: 'rug', flat: true },
     tv: { name: 'テレビ', size: [2, 1], art: 'tv', small: true, fitHeight: 0.5, prefer: 'tvstand', use: 'look', lines: ['テレビ見よう', 'この番組すき'] },
-    vase: { name: '花びん', size: [1, 1], art: 'vase', small: true, fitHeight: 0.32, use: 'look', lines: ['お花、かわいい'] },
+    vase: { name: '花びん', size: [1, 1], art: 'vase', small: true, fitHeight: 0.5, use: 'look', lines: ['お花、かわいい'] },
     window: { name: '窓', size: [3, 0], art: 'window', wall: true, y: 0.85, use: 'look', lines: ['いい天気', '外はどうかな'] },
     window2: { name: '窓（アーチ）', size: [2, 0], art: 'window2', wall: true, y: 0.8, use: 'look', lines: ['月がきれい', '外はどうかな'] },
     picture: { name: '絵', size: [2, 0], art: 'picture', wall: true, y: 1.25, use: 'look', lines: ['すてきな絵', 'この絵、すき'] },
 };
+// お店の値段（コイン）
+const PRICES = {
+    bed: 1200, sofa: 1500, chair: 300, table: 900, lowtable: 600, desk: 800, bookshelf: 1000, wardrobe: 1100, chest: 800,
+    nightstand: 400, tvstand: 700, lamp: 500, lamp2: 550, plant: 400, plant2: 250, vase2: 350, rug: 700, tv: 1200, vase: 200,
+    window: 900, window2: 1000, picture: 600,
+};
+for (const [type, def] of Object.entries(FURNITURE)) def.price = PRICES[type] || 500;
 function kindOf(item) {
     const d = FURNITURE[item.type];
     return d.wall ? 'wall' : d.small ? 'small' : d.flat ? 'flat' : 'floor';
@@ -82,8 +89,13 @@ function makeDefaultGame() {
         resident: { show: true, name: 'ヴァンプ子' },
         presets: [], // { id, name, savedAt, items }
         nextPresetId: 1,
+        coins: START_COINS,
+        owned: { rug: 1, bed: 1, plant: 1, sofa: 1, lowtable: 1, window: 1, picture: 1 }, // 持っている家具の数（置いた分も含む）
+        day: 1, clock: 0, // ゲームの中の日と、その日の経った秒数
+        shop: { day: 0, items: [], sold: [] }, // その日の品ぞろえ（sold: 売れた品物の番号）
     };
 }
+const START_COINS = 600;
 const MAX_PRESETS = 30;
 let game = makeDefaultGame();
 let resetting = false;
@@ -155,6 +167,7 @@ function sanitizeItems(list) {
 }
 function saveGame() {
     if (resetting) return;
+    if (typeof updateCatalogCounts === 'function') updateCatalogCounts();
     try { localStorage.setItem(SAVE_KEY, JSON.stringify(game)); } catch (err) { console.error(err); }
     recordHistory();
     requestRender();
@@ -195,6 +208,28 @@ function loadGame() {
             .slice(0, MAX_PRESETS);
     }
     game.nextPresetId = Math.max(Math.round(num(p.nextPresetId)), game.presets.reduce((m, ps) => Math.max(m, ps.id), 0) + 1);
+    // お金・持ち物・日
+    if (Number(p.saveVersion) >= 4 && p.owned && typeof p.owned === 'object') {
+        game.owned = {};
+        for (const [t, n] of Object.entries(p.owned)) if (FURNITURE[t] && Math.round(num(n)) > 0) game.owned[t] = Math.min(99, Math.round(num(n)));
+        game.coins = Math.max(0, Math.round(num(p.coins)));
+    } else {
+        // v0.11 までは家具が使い放題だった。部屋とプリセットに置いていた家具は、持っていることにする
+        game.owned = {};
+        for (const list of [game.items, ...game.presets.map(ps => ps.items)]) {
+            const n = {};
+            for (const it of list) n[it.type] = (n[it.type] || 0) + 1;
+            for (const [t, c] of Object.entries(n)) game.owned[t] = Math.max(game.owned[t] || 0, c);
+        }
+    }
+    // 部屋に置いてある数は、必ず持っていることにする（壊れたセーブでも家具が消えないように）
+    for (const it of game.items) game.owned[it.type] = Math.max(game.owned[it.type] || 0, placedCount(it.type));
+    game.day = Math.max(1, Math.round(num(p.day)) || 1);
+    game.clock = Math.min(DAY_SEC - 1, Math.max(0, num(p.clock)));
+    const sh = p.shop;
+    if (sh && Number(sh.day) === game.day && Array.isArray(sh.items) && sh.items.every(t => FURNITURE[t])) {
+        game.shop = { day: game.day, items: sh.items.slice(0, SHOP_SIZE), sold: Array.isArray(sh.sold) ? sh.sold.filter(i => Number.isInteger(i)) : [] };
+    }
 }
 
 // ---------- 配置の計算 ----------
@@ -461,6 +496,84 @@ function fitAffine(src, dst) {
     const [a, c, e] = solve(bx), [b, d, f] = solve(by);
     return [a, b, c, d, e, f];
 }
+// ---- 壁掛けの遠近の変形 ----
+// AIの窓の絵は、上の辺と下の辺の傾きが違う台形のことがある。平行四辺形の変形では 4 つの角がそろわないので、
+// 射影変換で 4 つの角を壁の上の四角にぴったり合わせた絵を作って取っておく（絵・色合い・掛ける壁ごと。掛ける位置は平行移動だけ）
+function solveHomography(src, dst) {
+    const A = [], b = [];
+    for (let i = 0; i < 4; i++) {
+        const [x, y] = src[i], [X, Y] = dst[i];
+        A.push([x, y, 1, 0, 0, 0, -X * x, -X * y]); b.push(X);
+        A.push([0, 0, 0, x, y, 1, -Y * x, -Y * y]); b.push(Y);
+    }
+    for (let c = 0; c < 8; c++) { // ガウス・ジョルダンの消去法
+        let piv = c;
+        for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+        if (Math.abs(A[piv][c]) < 1e-12) return null;
+        [A[c], A[piv]] = [A[piv], A[c]]; [b[c], b[piv]] = [b[piv], b[c]];
+        for (let r = 0; r < 8; r++) {
+            if (r === c || !A[r][c]) continue;
+            const f = A[r][c] / A[c][c];
+            for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k];
+            b[r] -= f * b[c];
+        }
+    }
+    return [...b.map((v, i) => v / A[i][i]), 1];
+}
+function applyH(H, x, y) { const w = H[6] * x + H[7] * y + H[8]; return [(H[0] * x + H[1] * y + H[2]) / w, (H[3] * x + H[4] * y + H[5]) / w, w]; }
+function invertH(H) {
+    const [a, b, c, d, e, f, g, h, i] = H;
+    const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g, det = a * A + b * B + c * C;
+    return [A / det, -(b * i - c * h) / det, (b * f - c * e) / det, B / det, (a * i - c * g) / det, -(a * f - c * d) / det, C / det, -(a * h - b * g) / det, (a * e - b * d) / det];
+}
+const warpCache = new Map();
+// 絵（色合いを当てたもの）を、src4 の 4 点が dst4（部屋の点、掛ける位置の左下が原点）に来るように変形する
+function warpedWall(art, tint, src4, dst4) {
+    const key = `${art}|${JSON.stringify(tint || null)}|${JSON.stringify(src4)}|${JSON.stringify(dst4)}`;
+    if (warpCache.has(key)) { const v = warpCache.get(key); warpCache.delete(key); warpCache.set(key, v); return v; }
+    const im = images.get(art), srcImg = tintedSource(art, tint);
+    if (!im || !im.data) return null;
+    const sd = srcImg === im.img ? im.data.data : srcImg.getContext('2d').getImageData(0, 0, im.w, im.h).data;
+    const H = solveHomography(src4, dst4);
+    if (!H) return null;
+    const cs = [[0, 0], [im.w, 0], [0, im.h], [im.w, im.h]].map(([x, y]) => applyH(H, x, y));
+    if (cs.some(p => !(p[2] > 0))) return null; // 絵の端が「地平線」の向こうに行く（変形が大きすぎる）
+    const Hi = invertH(H);
+    // 元の絵とだいたい同じ細かさで作る
+    const R = Math.min(6, Math.max(1, Math.hypot(src4[1][0] - src4[0][0], src4[1][1] - src4[0][1]) / Math.hypot(dst4[1][0] - dst4[0][0], dst4[1][1] - dst4[0][1])));
+    const x0 = Math.min(...cs.map(p => p[0])), y0 = Math.min(...cs.map(p => p[1]));
+    const W = Math.ceil((Math.max(...cs.map(p => p[0])) - x0) * R), Hh = Math.ceil((Math.max(...cs.map(p => p[1])) - y0) * R);
+    const out = new ImageData(W, Hh), od = out.data, alpha = new Uint8Array(W * Hh), sw = im.w, sh = im.h;
+    for (let py = 0; py < Hh; py++) {
+        const Y = y0 + (py + 0.5) / R;
+        for (let px = 0; px < W; px++) {
+            const X = x0 + (px + 0.5) / R;
+            const w = Hi[6] * X + Hi[7] * Y + Hi[8];
+            const u = (Hi[0] * X + Hi[1] * Y + Hi[2]) / w - 0.5, v = (Hi[3] * X + Hi[4] * Y + Hi[5]) / w - 0.5;
+            if (u < -1 || v < -1 || u >= sw || v >= sh) continue;
+            // 4 点の間をなめらかにつなぐ（透明な所の色が混ざらないよう、不透明さで重みを付ける）
+            const ix = Math.floor(u), iy = Math.floor(v), fx = u - ix, fy = v - iy;
+            let r = 0, g = 0, b = 0, a = 0;
+            for (let k = 0; k < 4; k++) {
+                const xx = ix + (k & 1), yy = iy + (k >> 1);
+                if (xx < 0 || yy < 0 || xx >= sw || yy >= sh) continue;
+                const wt = ((k & 1) ? fx : 1 - fx) * ((k >> 1) ? fy : 1 - fy), q = (yy * sw + xx) * 4, aa = sd[q + 3] * wt;
+                r += sd[q] * aa; g += sd[q + 1] * aa; b += sd[q + 2] * aa; a += aa;
+            }
+            if (a < 1) continue;
+            const o = (py * W + px) * 4;
+            od[o] = r / a; od[o + 1] = g / a; od[o + 2] = b / a; od[o + 3] = a;
+            alpha[py * W + px] = a;
+        }
+    }
+    const c = document.createElement('canvas');
+    c.width = W; c.height = Hh;
+    c.getContext('2d').putImageData(out, 0, 0);
+    const v = { img: c, w: W, h: Hh, alpha, m: [1 / R, 0, 0, 1 / R, x0, y0] };
+    warpCache.set(key, v);
+    if (warpCache.size > 40) warpCache.delete(warpCache.keys().next().value);
+    return v;
+}
 // 家具の絵の置き方（img/sprites.json の測った値を使う）
 // - 壁掛け: 本体（窓枠・額縁の正面）の 4 つの角を、壁の上の四角に合わせる（飾りははみ出してよい）。絵の向き（右の壁向き・左の壁向き）と掛ける壁が違えば左右反転
 // - ラグ: 床に着く 3 つの角を、足元の四角の角に合わせる
@@ -479,6 +592,18 @@ function artMatrix(item) {
         let [tl, tr, bl, br] = meta.wall.face;
         const rightWallArt = (br[1] - bl[1]) > 0; // 下の辺が右下がりなら、右の壁向きの絵
         const mirror = rightWallArt === !!item.rot;
+        {
+            // 射影変換で 4 つの角をぴったり合わせる（反対の壁向きの絵は、左右の角を入れ替えて合わせると左右反転になる）
+            const h = wallHeight(def), len = def.size[0];
+            const src4 = mirror ? [tr, tl, br, bl] : [tl, tr, bl, br];
+            const dst4 = item.rot ? [P(0, len, h), P(0, 0, h), P(0, len, 0), P(0, 0, 0)] : [P(0, 0, h), P(len, 0, h), P(0, 0, 0), P(len, 0, 0)];
+            const wv = warpedWall(def.art, item.tint, src4, dst4);
+            if (wv) {
+                const off = item.rot ? P(0, item.gx, lift) : P(item.gx, 0, lift), m = [...wv.m];
+                m[4] += off[0]; m[5] += off[1];
+                return { m, im: wv, src: wv.img };
+            }
+        }
         if (mirror) [tl, tr, bl, br] = [fp(tr), fp(tl), fp(br), fp(bl)];
         const h = wallHeight(def), len = def.size[0];
         const [s0, s1] = item.rot ? [item.gx + len, item.gx] : [item.gx, item.gx + len];
@@ -830,6 +955,7 @@ function select(uid) {
     requestRender();
 }
 function addItem(type) {
+    if (available(type) <= 0) { toast(`${FURNITURE[type].name}は全部置いています。お店で買うと増やせます`); return; }
     const item = { uid: game.nextUid++, type, gx: 0, gz: 0, rot: 0 };
     if (FURNITURE[type].wall) item.y = FURNITURE[type].y;
     Object.assign(item, findFreeSpot(item));
@@ -1056,7 +1182,7 @@ function renderCatalog() {
     wrap.innerHTML = '';
     for (const [kind] of CATALOG_GROUPS) {
         for (const [type, def] of Object.entries(FURNITURE)) {
-            if (kindOf({ type }) !== kind) continue;
+            if (kindOf({ type }) !== kind || !game.owned[type]) continue;
             const b = document.createElement('button');
             b.className = 'item';
             b.dataset.type = type;
@@ -1068,9 +1194,22 @@ function renderCatalog() {
                 tag.textContent = kind === 'small' ? '小物' : '壁掛け';
                 b.prepend(tag);
             }
+            const count = document.createElement('small');
+            count.className = 'item-count';
+            b.append(count);
             b.addEventListener('click', () => addItem(type));
             wrap.appendChild(b);
         }
+    }
+    if (!wrap.children.length) wrap.innerHTML = '<p class="empty">家具を持っていません。🛒 お店で買えます</p>';
+    updateCatalogCounts();
+}
+// 一覧の「あと何個置けるか」
+function updateCatalogCounts() {
+    for (const b of document.querySelectorAll('#items .item')) {
+        const n = available(b.dataset.type);
+        b.querySelector('.item-count').textContent = n > 0 ? `あと ${n}` : '置いた';
+        b.classList.toggle('used-up', n <= 0);
     }
 }
 
@@ -1510,6 +1649,7 @@ function arrive() {
         return;
     }
     r.mode = 'use';
+    earn(USE_COINS[p.act] || 5);
     const time = p.act === 'lie' ? randIn(14, 24) : p.act === 'sit' ? randIn(8, 15) : randIn(3, 6);
     r.use = { plan: p, k: 0, time, leaving: false };
     if (Math.random() < 0.6 && p.lines.length) residentSay(pickOne(p.lines));
@@ -1849,6 +1989,112 @@ fitDialog.addEventListener('click', (e) => { if (e.target === fitDialog) fitDial
 fitDialog.addEventListener('close', () => { fitState.drag = null; restoreView(); });
 new ResizeObserver(drawFitCanvas).observe(fitCanvas);
 
+// ---------- お金・ゲームの中の 1 日・お店 ----------
+// リアルな時間（現実の日付・時刻、閉じている間に進むもの）は使わない。
+// ゲームの中の時計は、画面を開いている間だけ進む（DAY_SEC 秒で 1 日。7:00 から 23:00）。
+// 1 日が終わると、次の日の朝におこづかいが入り、お店の品物が入れかわる。住人が家具を使うと、少しお金が入る
+const DAY_SEC = 360, ALLOWANCE = 300, SHOP_SIZE = 6;
+const USE_COINS = { lie: 20, sit: 10, look: 5 };
+const DAY_START_H = 7, DAY_END_H = 23;
+let economyReady = false; // 絵を読み終わるまでは時計を進めない
+function placedCount(type) { return game.items.filter(it => it.type === type).length; }
+function available(type) { return (game.owned[type] || 0) - placedCount(type); }
+// 持っている数を超える家具を外す（プリセットを呼び出すときなど）
+function limitToOwned(items) {
+    const used = {};
+    return items.filter(it => (used[it.type] = (used[it.type] || 0) + 1) <= (game.owned[it.type] || 0));
+}
+// その日の品ぞろえ。まだ持っていない家具が出やすい
+function makeStock() {
+    const pool = Object.keys(FURNITURE).map(t => ({ t, w: game.owned[t] ? 1 : 3 })), items = [];
+    while (items.length < SHOP_SIZE && pool.length) {
+        let r = Math.random() * pool.reduce((s, p) => s + p.w, 0), i = 0;
+        while (i < pool.length - 1 && (r -= pool[i].w) > 0) i++;
+        items.push(pool.splice(i, 1)[0].t);
+    }
+    return { day: game.day, items, sold: [] };
+}
+const coinsEl = document.getElementById('coins'), clockEl = document.getElementById('clock');
+function clockText() {
+    const h = DAY_START_H + (DAY_END_H - DAY_START_H) * Math.min(1, game.clock / DAY_SEC), hh = Math.floor(h), mm = Math.floor((h - hh) * 6) * 10;
+    return `${game.day}日目 ${hh}:${String(mm).padStart(2, '0')}`;
+}
+function updateStatus() {
+    coinsEl.textContent = `🪙 ${game.coins.toLocaleString()}`;
+    clockEl.textContent = clockText();
+}
+function earn(n) {
+    game.coins += n;
+    updateStatus();
+    coinsEl.classList.remove('gain');
+    void coinsEl.offsetWidth; // 続けて入ったときも、もう一度光らせる
+    coinsEl.classList.add('gain');
+    if (shopDialog.open) renderShop();
+}
+function newDay() {
+    game.day++;
+    game.coins += ALLOWANCE;
+    game.shop = makeStock();
+    updateStatus();
+    if (shopDialog.open) renderShop();
+    toast(`${game.day}日目の朝。おこづかい 🪙${ALLOWANCE}、お店の品物が入れかわりました`);
+    saveGame();
+}
+// 時計を進める（sec 秒）
+function advanceClock(sec) {
+    game.clock += sec;
+    while (game.clock >= DAY_SEC) { game.clock -= DAY_SEC; newDay(); }
+    updateStatus();
+}
+setInterval(() => { if (economyReady && !document.hidden && !resetting) advanceClock(1); }, 1000);
+
+// ---- お店 ----
+const shopDialog = document.getElementById('shop-dialog');
+function renderShop() {
+    document.getElementById('shop-coins').textContent = `🪙 ${game.coins.toLocaleString()}`;
+    document.getElementById('shop-day').textContent = `${game.day}日目の品ぞろえ`;
+    const list = document.getElementById('shop-list');
+    list.innerHTML = '';
+    game.shop.items.forEach((type, i) => {
+        const def = FURNITURE[type], sold = game.shop.sold.includes(i), have = game.owned[type] || 0;
+        const card = document.createElement('div');
+        card.className = 'shop-item' + (sold ? ' sold' : '');
+        card.innerHTML = `<img src="img/${def.art}.webp?v=${APP_VERSION}" alt=""><span class="shop-name"></span><small class="shop-have"></small><button></button>`;
+        card.querySelector('.shop-name').textContent = def.name;
+        const tag = card.querySelector('.shop-have');
+        tag.textContent = have ? `持っている ×${have}` : 'NEW';
+        if (!have) tag.classList.add('new');
+        const b = card.querySelector('button');
+        b.textContent = sold ? '売り切れ' : `🪙 ${def.price.toLocaleString()}`;
+        b.disabled = sold || game.coins < def.price;
+        if (!sold) b.setAttribute('aria-label', `${def.name}を ${def.price} コインで買う`);
+        b.addEventListener('click', () => buy(i));
+        list.appendChild(card);
+    });
+}
+function buy(i) {
+    const type = game.shop.items[i], def = FURNITURE[type];
+    if (!def || game.shop.sold.includes(i) || game.coins < def.price) return false;
+    game.coins -= def.price;
+    game.owned[type] = (game.owned[type] || 0) + 1;
+    game.shop.sold.push(i);
+    updateStatus();
+    renderShop();
+    renderCatalog();
+    saveGame();
+    toast(`${def.name}を買いました。下の一覧から置けます`);
+    if (resident.visible && Math.random() < 0.7) residentSay(pickOne([`${def.name}、届くのたのしみ！`, 'わあ、新しい家具！', 'どこに置こうかな']));
+    return true;
+}
+function openShop() {
+    if (game.shop.day !== game.day) game.shop = makeStock();
+    renderShop();
+    shopDialog.showModal();
+}
+document.getElementById('shop-btn').addEventListener('click', openShop);
+document.getElementById('shop-close').addEventListener('click', () => shopDialog.close());
+shopDialog.addEventListener('click', (e) => { if (e.target === shopDialog) shopDialog.close(); });
+
 // ---------- 設定 ----------
 const menu = document.getElementById('menu');
 const nameInput = document.getElementById('resident-name');
@@ -1970,12 +2216,13 @@ function savePreset(name) {
 function loadPreset(id) {
     const ps = game.presets.find(p => p.id === id);
     if (!ps) return;
-    game.items = sanitizeItems(ps.items);
+    const all = sanitizeItems(ps.items);
+    game.items = limitToOwned(all);
     game.nextUid = Math.max(game.nextUid, game.items.reduce((m, it) => Math.max(m, it.uid), 0) + 1);
     select(null);
     saveGame();
     if (presetDialog.open) presetDialog.close();
-    toast(`「${ps.name}」を呼び出しました`);
+    toast(all.length > game.items.length ? `「${ps.name}」を呼び出しました（持っていない家具は置きませんでした）` : `「${ps.name}」を呼び出しました`);
 }
 document.getElementById('preset-btn').addEventListener('click', () => { presetName.value = ''; renderPresets(); presetDialog.showModal(); });
 document.getElementById('preset-save').addEventListener('click', () => { if (savePreset(presetName.value)) { presetName.value = ''; renderPresets(); } });
@@ -2002,6 +2249,9 @@ const ready = loadAll().then(() => {
     // 壁掛けの高さの範囲は絵から決まるので、絵を読んでから直す
     for (const it of game.items) if (kindOf(it) === 'wall') clampItem(it);
     recordHistory(); // 起動したときの部屋を「元に戻す」の起点にする
+    if (game.shop.day !== game.day) game.shop = makeStock();
+    updateStatus();
+    economyReady = true;
     spawnResident();
     setResidentShown(game.resident.show);
     render();
@@ -2016,7 +2266,12 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 // テストから使う
 window.__lifemaker = {
     APP_VERSION, FURNITURE, ready, game: () => game, selected: () => selectedUid, view,
-    addItem, select, rotateSelected, removeSelected, isBlocked, footprint, supportOf: (uid) => supportOf(findItem(uid))?.uid ?? null,
+    // テストでは、持っていない家具も置けるように 1 つ足してから置く
+    addItem(type) { if (available(type) <= 0) { game.owned[type] = (game.owned[type] || 0) + 1; renderCatalog(); } addItem(type); },
+    grantAll(n = 5) { for (const t of Object.keys(FURNITURE)) game.owned[t] = Math.max(game.owned[t] || 0, n); renderCatalog(); saveGame(); },
+    setStock(items) { game.shop = { day: game.day, items, sold: [] }; if (shopDialog.open) renderShop(); },
+    advanceClock, buy, openShop, DAY_SEC, ALLOWANCE,
+    select, rotateSelected, removeSelected, isBlocked, footprint, supportOf: (uid) => supportOf(findItem(uid))?.uid ?? null,
     undo, redo, savePreset, loadPreset, zoomAt, openTint, kindOf, openFit, metaOf, exportFit,
     fit: () => ({ base: fitBase, local: fitLocal, state: { art: fitState.art, kind: fitState.kind, sel: fitState.sel, pts: fitState.pts.map(p => [...p]) } }),
     artMatrix: (uid) => artMatrix(findItem(uid)).m,

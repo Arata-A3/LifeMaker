@@ -59,7 +59,7 @@ async function evaluate(expr) {
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
     return r.result.value;
 }
-async function open(path = '', { width = 390, height = 844, mobile = true, resident = false } = {}) {
+async function open(path = '', { width = 390, height = 844, mobile = true, resident = false, grant = true } = {}) {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile });
     await send('Page.navigate', { url: BASE + path });
     for (let i = 0; i < 50; i++) {
@@ -70,6 +70,8 @@ async function open(path = '', { width = 390, height = 844, mobile = true, resid
     await sleep(100);
     // 住人は歩き回ってほかのテストの指の操作に当たるので、ふだんは止めて隠す
     if (!resident) await evaluate('window.__lifemaker.resident.freeze(true)');
+    // ふだんのテストは、どの家具も置けるように持たせておく（お店のテストでは持たせない）
+    if (grant) await evaluate('window.__lifemaker.grantAll()');
 }
 async function clearSave() {
     await send('Page.navigate', { url: 'about:blank' }); // 閉じる直前の自動保存で書き戻されないよう、先に離れる
@@ -118,6 +120,7 @@ await test('起動して版・一覧・最初の部屋が出る', async () => {
     assert(await evaluate(`document.querySelectorAll('#items .item').length`) === await L('Object.keys(L.FURNITURE).length'), '家具の一覧の数が違う');
     assert(await L('L.game().items.length') === 7, '最初の家具が 7 つない');
     assert(await L('L.game().items.every(it => !L.isBlocked(it))'), '最初の家具が重なっている');
+    for (let i = 0; i < 30 && await evaluate(`[...document.querySelectorAll('#items img')].some(i => !i.complete)`); i++) await sleep(100);
     const broken = await evaluate(`[...document.querySelectorAll('#items img')].filter(i => !i.complete || !i.naturalWidth).length`);
     assert(broken === 0, '一覧の絵が読めていない');
 });
@@ -422,6 +425,71 @@ await test('丸い物は底の点と高さで直せ、開き直しても残る',
     await evaluate(`localStorage.removeItem('lifemaker2d_fit')`);
     await open();
     await L(`L.select(${uid}) || L.removeSelected()`);
+});
+
+await test('はじめは持っている家具だけが一覧に出て、置ききると置けない', async () => {
+    await clearSave();
+    await open('', { grant: false });
+    assert(await L('L.game().coins') === 600, 'はじめのお金が違う');
+    const types = await evaluate(`[...document.querySelectorAll('#items .item')].map(b => b.dataset.type).sort().join()`);
+    assert(types === 'bed,lowtable,picture,plant,rug,sofa,window', '一覧が持っている家具になっていない: ' + types);
+    assert(await evaluate(`document.querySelector('#items .item[data-type="plant"] .item-count').textContent`) === '置いた', '置いた印が出ない');
+    const n = await L('L.game().items.length');
+    await evaluate(`document.querySelector('#items .item[data-type="plant"]').click()`);
+    assert(await L('L.game().items.length') === n, '持っている数より多く置けてしまう');
+    await L('L.select(3)');
+    await L('L.removeSelected()');
+    assert(await evaluate(`document.querySelector('#items .item[data-type="plant"] .item-count').textContent`) === 'あと 1', 'しまっても数が戻らない');
+});
+
+await test('お店で買うとお金が減り、一覧に出て置ける。お金が足りないと買えない', async () => {
+    await L(`L.setStock(['chair', 'bed', 'tv', 'sofa', 'vase', 'desk'])`);
+    await evaluate(`document.getElementById('shop-btn').click()`);
+    assert(await evaluate(`document.getElementById('shop-dialog').open`), 'お店が開かない');
+    assert(await evaluate(`document.querySelectorAll('#shop-list .shop-item').length`) === 6, '品物の数が違う');
+    await shot('shop');
+    await evaluate(`document.querySelectorAll('#shop-list button')[0].click()`); // いす 300
+    assert(await L('L.game().coins') === 300 && await L('L.game().owned.chair') === 1, '買えていない');
+    assert(await evaluate(`document.querySelectorAll('#shop-list button')[0].disabled`), '売り切れにならない');
+    assert(await evaluate(`document.querySelectorAll('#shop-list button')[3].disabled`), 'お金が足りないのに買える'); // ソファ 1500
+    assert(!(await L('L.buy(3)')), 'お金が足りないのに買えた');
+    await evaluate(`document.getElementById('shop-close').click()`);
+    await evaluate(`document.querySelector('#items .item[data-type="chair"]').click()`);
+    assert((await L('L.game().items')).some(i => i.type === 'chair'), '買ったいすを置けない');
+    await open('', { grant: false });
+    assert(await L('L.game().coins') === 300 && await L('L.game().shop.sold.length') === 1, '開き直すとお金・売り切れが戻る');
+});
+
+await test('ゲームの時計が 1 日進むと、おこづかいが入り、品物が入れかわる', async () => {
+    const before = await L('({ day: L.game().day, coins: L.game().coins })');
+    await L('L.advanceClock(L.DAY_SEC / 2)');
+    assert(await L('L.game().day') === before.day, '半日で次の日になった');
+    assert(/12:00|13:00|14:00|15:00/.test(await evaluate(`document.getElementById('clock').textContent`)), '時計の表示がおかしい');
+    await L('L.advanceClock(L.DAY_SEC / 2)');
+    const g = await L('({ day: L.game().day, coins: L.game().coins, shop: L.game().shop })');
+    assert(g.day === before.day + 1 && g.coins === before.coins + 300, 'おこづかいが入らない: ' + JSON.stringify(g));
+    assert(g.shop.day === g.day && g.shop.sold.length === 0 && g.shop.items.length === 6, '品物が入れかわらない');
+});
+
+await test('住人が家具を使うとお金が入る', async () => {
+    await L('L.resident.freeze(false, false)');
+    await L('L.resident.place(5, 7)');
+    const c0 = await L('L.game().coins');
+    assert(await L('L.resident.go(4)'), 'ソファに向かわない');
+    await L('L.resident.step(12)');
+    assert(await L('L.game().coins') > c0, 'お金が入らない');
+    await L('L.resident.freeze(true)');
+});
+
+await test('前の版のセーブは、置いていた家具を持っていることになる', async () => {
+    await clearSave();
+    await evaluate(`localStorage.setItem('lifemaker2d_save', JSON.stringify({ saveVersion: 3, items: [{ uid: 1, type: 'chair', gx: 0, gz: 0, rot: 0 }, { uid: 2, type: 'chair', gx: 2, gz: 0, rot: 0 }],
+        presets: [{ id: 1, name: 'a', items: [{ uid: 1, type: 'tv', gx: 0, gz: 0, rot: 0 }] }] }))`);
+    await open('', { grant: false });
+    const g = await L('({ owned: L.game().owned, coins: L.game().coins })');
+    assert(g.owned.chair === 2 && g.owned.tv === 1 && g.coins === 600, JSON.stringify(g));
+    await clearSave();
+    await open();
 });
 
 await test('しまうと消える', async () => {
