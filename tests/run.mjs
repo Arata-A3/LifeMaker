@@ -59,7 +59,7 @@ async function evaluate(expr) {
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text);
     return r.result.value;
 }
-async function open(path = '', { width = 390, height = 844, mobile = true } = {}) {
+async function open(path = '', { width = 390, height = 844, mobile = true, resident = false } = {}) {
     await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile });
     await send('Page.navigate', { url: BASE + path });
     for (let i = 0; i < 50; i++) {
@@ -67,6 +67,8 @@ async function open(path = '', { width = 390, height = 844, mobile = true } = {}
         try { if (await evaluate('!!window.__lifemaker')) break; } catch { }
     }
     await sleep(200);
+    // 住人は歩き回ってほかのテストの指の操作に当たるので、ふだんは止めて隠す
+    if (!resident) await evaluate('window.__lifemaker.resident.freeze(true)');
 }
 async function clearSave() {
     await send('Page.navigate', { url: 'about:blank' }); // 閉じる直前の自動保存で書き戻されないよう、先に離れる
@@ -614,6 +616,124 @@ if (SHOT_DIR) {
     await dragMouse({ x: 20, y: 300 }, { x: 21, y: 300 }, 1);
     await shot('closeup');
 }
+
+// ---------- 住人 ----------
+await clearSave();
+await open('', { resident: true });
+const R = (expr) => L(`(() => { const R = L.resident; return ${expr}; })()`);
+
+await test('住人がいて、家具を避けて歩く', async () => {
+    await R('R.freeze(true, false)');
+    const st = await R('R.state()');
+    assert(st.visible, '住人が見えていない');
+    assert(await R(`R.free(${st.x}, ${st.z})`), '家具の上に立っている');
+    // 部屋の端から端へ歩かせて、道が家具を通らないか・途中で家具に入らないかを見る
+    await R('R.place(-2.2, 2.2)');
+    let bad = 0, moved = 0;
+    for (let n = 0; n < 6; n++) {
+        await R('R.state().mode === "idle" && R.go(null)'); // 立ち止まっていたら、次の行き先を決めさせる
+        const before = await R('R.state()');
+        if (before.path.length) {
+            let ax = before.x, az = before.z;
+            for (const p of before.path) { if (!(await R(`R.line(${ax}, ${az}, ${p.x}, ${p.z})`))) bad++; ax = p.x; az = p.z; }
+        }
+        for (let k = 0; k < 20; k++) {
+            await R('R.step(0.3)');
+            const s = await R('R.state()');
+            if (s.mode !== 'use' && !(await R(`R.free(${s.x}, ${s.z})`))) bad++;
+            moved = Math.max(moved, Math.hypot(s.x + 2.2, s.z - 2.2));
+        }
+    }
+    assert(bad === 0, `家具を通った回数: ${bad}`);
+    assert(moved > 0.5, '歩いていない');
+});
+
+await test('住人はソファに座り、ソファを動かすと立つ', async () => {
+    await R('R.place(0, 0.5)');
+    assert(await R('R.go(4)'), 'ソファへ向かわない');
+    let s;
+    for (let k = 0; k < 60; k++) { await R('R.step(0.5)'); s = await R('R.state()'); if (s.mode === 'use' && s.k >= 1) break; }
+    assert(s.mode === 'use' && s.act === 'sit' && s.k >= 1, `座っていない: ${JSON.stringify(s)}`);
+    assert(s.y > 0.1, '腰の高さが上がっていない');
+    if (SHOT_DIR) {
+        // 近くから見た姿（座る・立つ）
+        const c0 = await L('({ r: L.cam.radius, p: L.cam.polar, a: L.cam.azimuth, x: L.cam.target.x, z: L.cam.target.z })');
+        await L(`(() => { L.cam.target.set(${s.x}, 0.6, ${s.z}); L.cam.radius = 3.2; L.cam.polar = 1.15; L.cam.azimuth = Math.PI + 0.5; L.updateCamera(); })()`);
+        await R('R.step(0.05)');
+        await shot('resident_sit_close');
+        await R('R.place(1.0, -0.5)');
+        await L(`(() => { L.cam.target.set(1.0, 0.6, -0.5); L.cam.azimuth = 0.4; L.updateCamera(); })()`);
+        await R('R.step(0.5)');
+        await shot('resident_stand_close');
+        await L(`(() => { L.cam.target.set(${c0.x}, 0.6, ${c0.z}); L.cam.radius = ${c0.r}; L.cam.polar = ${c0.p}; L.cam.azimuth = ${c0.a}; L.updateCamera(); })()`);
+        await R('R.place(0, 0.5)');
+        await R('R.go(4)');
+        for (let k = 0; k < 40; k++) { await R('R.step(0.5)'); const t = await R('R.state()'); if (t.mode === 'use' && t.k >= 1) break; }
+    }
+    await L('(() => { const it = L.game().items.find(i => i.uid === 4); it.gz = 0; it.gx = 6; L.rebuildAll(); })()');
+    await R('R.step(0.6)');
+    s = await R('R.state()');
+    assert(s.mode !== 'use', 'ソファが動いたのに座ったまま');
+    assert(await R(`R.free(${s.x}, ${s.z})`), '立ったあと家具に埋まっている');
+});
+
+await test('住人はベッドで寝て、吹き出しに 💤 が出る', async () => {
+    await R('R.place(0, 0.5)');
+    assert(await R('R.go(2)'), 'ベッドへ向かわない');
+    let s;
+    for (let k = 0; k < 60; k++) { await R('R.step(0.5)'); s = await R('R.state()'); if (s.mode === 'use' && s.k >= 1) break; }
+    assert(s.act === 'lie' && s.k >= 1, `寝ていない: ${JSON.stringify(s)}`);
+    await R('R.step(3)');
+    assert((await R('R.state()')).bubble === '💤', '💤 が出ていない');
+    await shot('resident_sleep');
+});
+
+await test('住人を押すと話す（家具は選ばれない）', async () => {
+    await R('R.place(1.5, -1)');
+    await R('R.step(0.1)');
+    const p = await R('R.screen()');
+    await mouse('mousePressed', p.x, p.y);
+    await mouse('mouseReleased', p.x, p.y, 0);
+    await sleep(100);
+    await R('R.step(0.1)');
+    const s = await R('R.state()');
+    assert(s.bubble && s.bubble !== '💤', `吹き出しが出ない: ${s.bubble}`);
+    assert(await L('L.selected()') === null, '家具が選ばれた');
+    await shot('resident_talk');
+});
+
+await test('置いた家具を住人が見に行く', async () => {
+    await R('R.place(0, 0.5)');
+    await evaluate(`document.querySelector('#items .item[data-type="chair"]').click()`);
+    await sleep(900);
+    const uid = await L('L.selected()');
+    const s = await R('R.state()');
+    assert(s.uid === uid && s.mode === 'walk', `いすへ向かわない: ${JSON.stringify(s)}`);
+    await evaluate(`document.getElementById('done-btn').click()`);
+});
+
+await test('設定で住人を隠せて、保存される', async () => {
+    await evaluate(`document.getElementById('menu-btn').click()`);
+    assert(await evaluate(`document.getElementById('resident-toggle').checked`), '最初から外れている');
+    await evaluate(`(() => { const c = document.getElementById('resident-toggle'); c.checked = false; c.dispatchEvent(new Event('change')); })()`);
+    assert(!(await R('R.state()')).visible, '隠れない');
+    assert(await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save')).resident === false`), '保存されていない');
+    await evaluate(`document.getElementById('menu-close').click()`);
+    await open('', { resident: true });
+    assert(!(await R('R.state()')).visible, '開き直すと出てくる');
+    await evaluate(`document.getElementById('menu-btn').click()`);
+    await evaluate(`(() => { const c = document.getElementById('resident-toggle'); c.checked = true; c.dispatchEvent(new Event('change')); })()`);
+    await evaluate(`document.getElementById('menu-close').click()`);
+    assert((await R('R.state()')).visible, '戻らない');
+});
+
+await test('住人がひとりで動き続けても止まらない', async () => {
+    await sleep(3000); // 実際の時間で動かす（エラーは最後のテストで確かめる）
+    const a = await R('R.state()');
+    await sleep(1500);
+    const b = await R('R.state()');
+    assert(a.visible && b.visible, '見えていない');
+});
 
 await test('ページでエラーが出ていない', async () => {
     assert(errors.length === 0, errors.join('\n'));

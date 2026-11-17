@@ -135,6 +135,20 @@ dialog#menu > button {
     border: 1px solid var(--line); background: var(--panel-2);
 }
 dialog#menu .danger { color: var(--danger); }
+dialog#menu .check { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 4px 2px; }
+
+/* 住人の吹き出し（頭の上に出す） */
+#bubble {
+    position: absolute; transform: translate(-50%, calc(-100% - 8px));
+    padding: 5px 10px; border-radius: 12px; font-size: 13px; white-space: nowrap;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line);
+    box-shadow: 0 2px 8px rgb(0 0 0 / .12); pointer-events: none;
+}
+#bubble::after {
+    content: ''; position: absolute; left: 50%; bottom: -6px; width: 10px; height: 10px;
+    background: var(--panel); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    transform: translateX(-50%) rotate(45deg);
+}
 dialog#menu .primary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
 
 #toast {
@@ -177,6 +191,7 @@ dialog.sheet {
 /* 色の画面は高さを固定し、部位を切り替えても上端が動かないようにする */
 #color-dialog { height: 58dvh; }
 dialog.sheet::backdrop { background: rgb(0 0 0 / .15); }
+#color-dialog.picking::backdrop { background: transparent; }
 dialog.sheet h2 { margin: 0 0 12px; font-size: 18px; }
 dialog.sheet h3 { margin: 14px 0 8px; font-size: 13px; color: var(--muted); font-weight: normal; }
 dialog.sheet button {

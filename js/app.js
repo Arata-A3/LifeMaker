@@ -1,6 +1,6 @@
 import * as THREE from '../lib/three.module.min.js';
 
-const APP_VERSION = '0.6.1';
+const APP_VERSION = '0.7.0';
 const SAVE_KEY = 'lifemaker_save';
 const SAVE_VERSION = 3; // 2: 家具の色を部位ごとに、床と壁を追加 / 3: テレビをテレビ台から分けた
 
@@ -441,6 +441,7 @@ function makeDefaultGame() {
             { uid: 3, type: 'plant', gx: 11, gz: 0, rot: 0, colors: {} },
             { uid: 4, type: 'sofa', gx: 4, gz: 9, rot: 2, colors: {} },
         ],
+        resident: true, // 住人を出す
         snap: true, // true: マス目にそろえる、false: 自由に置く
         floor: { pattern: 'wood', color: null }, // color: null は柄の元の色
         wall: { pattern: 'plain', color: null },
@@ -539,6 +540,7 @@ function loadGame() {
     const oldTv = !(Number(p.saveVersion) >= 3);
     if (Array.isArray(p.items)) game.items = sanitizeItems(oldTv ? splitTv(p.items) : p.items);
     game.snap = p.snap !== false;
+    game.resident = p.resident !== false;
     const maxUid = game.items.reduce((m, it) => Math.max(m, it.uid), 0);
     game.nextUid = Math.max(toInt(p.nextUid), maxUid + 1);
     game.floor = sanitizeSurface(p.floor, FLOOR_PATTERNS, 'wood');
@@ -1067,6 +1069,7 @@ function addItem(type) {
     buildObject(item);
     select(item.uid);
     saveGame();
+    residentNotice(item);
 }
 function rotateSelected() {
     const item = findItem(selectedUid);
@@ -1223,6 +1226,11 @@ canvas.addEventListener('pointerdown', (e) => {
     }
     if (pointers.size > 2) return;
 
+    // 住人を押したら話しかける（家具より手前にいるときだけ）
+    if (residentInFront(e.clientX, e.clientY)) {
+        gesture = { type: 'orbit', resident: true, lastX: e.clientX, lastY: e.clientY, startX: e.clientX, startY: e.clientY, moved: false };
+        return;
+    }
     const item = pickItem(e.clientX, e.clientY, e.pointerType === 'mouse' ? 10 : 22);
     const kind = item && kindOf(item);
     const base = { type: 'drag', uid: item?.uid, startX: e.clientX, startY: e.clientY, moved: false };
@@ -1333,7 +1341,10 @@ function endPointer(e) {
         }
         gesture = null;
     } else if (gesture.type === 'orbit') {
-        if (!gesture.moved && e.type === 'pointerup') select(null); // 何もない所をタップしたら選択をやめる
+        if (!gesture.moved && e.type === 'pointerup') {
+            if (gesture.resident) talkToResident();
+            else select(null); // 何もない所をタップしたら選択をやめる
+        }
         gesture = null;
     } else if (gesture.type === 'pinch') {
         // 1 本残ったら、そこから回転を続ける（飛ばないように位置を取り直す）
@@ -1428,6 +1439,7 @@ darkQuery.addEventListener('change', applyAppearance);
 const menu = document.getElementById('menu');
 document.getElementById('menu-btn').addEventListener('click', () => {
     menu.querySelectorAll('input[name="appearance"]').forEach(r => { r.checked = r.value === game.appearance; });
+    document.getElementById('resident-toggle').checked = game.resident;
     if (menu.showModal) menu.showModal();
 });
 document.getElementById('menu-close').addEventListener('click', () => menu.close());
@@ -1437,6 +1449,11 @@ menu.querySelectorAll('input[name="appearance"]').forEach(r => r.addEventListene
     applyAppearance();
     saveGame();
 }));
+document.getElementById('resident-toggle').addEventListener('change', (e) => {
+    game.resident = e.target.checked;
+    setResidentEnabled(game.resident);
+    saveGame();
+});
 document.getElementById('clear-room-btn').addEventListener('click', () => {
     if (!confirm('部屋の家具を全部しまいますか？')) return;
     game.items = [];
@@ -1747,7 +1764,9 @@ const eyedropBtn = colorDialog.querySelector('.cd-eyedrop');
 colorDialog.querySelector('.cd-eyedrop-sec').hidden = !('EyeDropper' in window);
 eyedropBtn.addEventListener('click', async () => {
     let res;
+    colorDialog.classList.add('picking'); // 外側の暗さを消して、部屋の色をそのまま取る
     try { res = await new window.EyeDropper().open(); } catch { return; } // Esc で取りやめ
+    finally { colorDialog.classList.remove('picking'); }
     const hex = normHex(res.sRGBHex);
     if (!hex || !cd.target) return;
     targetSet(cd.target, hex, true);
@@ -2021,6 +2040,495 @@ function toast(msg) {
     toastTimer = setTimeout(() => t.classList.remove('show'), 1800);
 }
 
+// ---------- 住人 ----------
+// 部屋を歩き回り、家具を使うキャラクター。位置は保存しない（開くたびに部屋の真ん中近くから始まる）。
+// 足元の中心が原点、正面は +z。身長はおよそ 1.15m（家具より少し小さめのかわいい体つき）。
+const RES = {
+    speed: 0.85,      // 歩く速さ（m/秒）
+    radius: 0.16,     // 家具とぶつからないための体の半径（m）
+    nav: 0.25,        // 道を探すマス目の大きさ（m）
+    hip: 0.42,        // 腰の高さ（m）
+    fps: 30,          // 住人が動いている間の描き直しの回数（電池のため 30 回/秒まで）
+};
+const RES_COLORS = { skin: '#f3d3b8', hair: '#5a3d2b', shirt: '#e8a15f', pants: '#56708f', shoes: '#4a3a30', eye: '#2b2620', cheek: '#f0a8a0' };
+// 家具ごとの使い方。sit: 座る、lie: 寝る、look: 前に立って眺める。
+// seats: 座る・寝る位置（家具の向きでの x, z と、腰を下ろす面の高さ）、from: 近づく位置
+const RES_USES = {
+    sofa: { act: 'sit', seats: [[-0.4, 0.06], [0.4, 0.06]], top: 0.56, from: 0.78, time: [9, 16], lines: ['ふう、ひと休み', 'このソファ、ふかふか', 'のんびりしよう'] },
+    chair: { act: 'sit', seats: [[0, 0.02]], top: 0.47, from: 0.5, time: [6, 11], lines: ['ちょっと座ろう', 'いすがちょうどいい'] },
+    bed: { act: 'lie', seats: [[0, -0.12]], top: 0.52, side: 0.78, time: [14, 24], lines: ['おやすみ…', 'すやすや'] },
+    bookshelf: { act: 'look', time: [4, 7], lines: ['何を読もうかな', 'この本、おもしろそう'] },
+    bookshelf2: { act: 'look', time: [4, 7], lines: ['何を読もうかな', '本がいっぱい'] },
+    wardrobe: { act: 'look', time: [3, 6], lines: ['今日は何を着よう', 'おしゃれしたいな'] },
+    chest: { act: 'look', time: [3, 5], lines: ['何をしまったっけ'] },
+    desk: { act: 'look', time: [4, 7], lines: ['ちょっと調べもの', 'がんばるぞ'] },
+    plant: { act: 'look', time: [3, 6], lines: ['水やりしなきゃ', '葉っぱがきれい'] },
+    tv: { act: 'look', dist: 1.3, time: [6, 10], lines: ['テレビ見よう', 'この番組すき'] },
+    window: { act: 'look', time: [4, 8], lines: ['いい天気', '外はどうかな'] },
+    mirror: { act: 'look', time: [3, 5], lines: ['寝ぐせ、直ってる？', 'よし！'] },
+    picture: { act: 'look', time: [3, 6], lines: ['すてきな絵', 'この絵、すき'] },
+    wallclock: { act: 'look', time: [2, 4], lines: ['もうこんな時間'] },
+};
+const RES_GREETINGS = ['こんにちは！', 'いい部屋だね', '模様替え、たのしいね', 'なになに？', 'ふふっ'];
+const RES_IDLE_LINES = ['♪', 'ふんふん♪', 'お散歩', 'ひろびろ'];
+
+const resident = {
+    root: new THREE.Group(), body: new THREE.Group(), head: new THREE.Group(),
+    legs: [], knees: [], arms: [],
+    x: 0, z: 0, face: 0,              // 位置と向き（rotation.y）
+    mode: 'idle',                      // idle: 立ち止まる / walk: 歩く / use: 家具を使う
+    path: [], plan: null,              // plan: これからすること（家具・位置・向き）
+    timer: 2, phase: 0, t: 0, hop: 0,
+    use: null,                         // { plan, k: 0..1 座る・寝るまでの進み具合, leaving }
+    pose: { leg: 0, knee: 0, arm: 0, armZ: 0.1, tilt: 0, y: 0 },
+    enabled: true, frozen: false, last: 0, lastDraw: 0, recentUid: null,
+    bubbleUntil: 0, bubbleText: '',
+};
+scene.add(resident.root);
+resident.root.add(resident.body);
+// 体の部品（つややかすぎない、丸みのある形）
+function resMesh(parent, geo, color, x, y, z) {
+    const m = new THREE.Mesh(geo, mat(color));
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    parent.add(m);
+    return m;
+}
+function buildResident() {
+    const r = resident, C = RES_COLORS;
+    r.body.position.y = RES.hip; // 体は腰を中心に倒す（寝るとき）
+    for (const s of [-1, 1]) {
+        // 脚: 腰 → ひざ → 足
+        const leg = new THREE.Group();
+        leg.position.set(s * 0.075, 0, 0);
+        resMesh(leg, new THREE.CylinderGeometry(0.06, 0.055, 0.2, 12), C.pants, 0, -0.1, 0);
+        const knee = new THREE.Group();
+        knee.position.y = -0.2;
+        resMesh(knee, new THREE.CylinderGeometry(0.05, 0.045, 0.18, 12), C.pants, 0, -0.09, 0);
+        const shoe = resMesh(knee, new THREE.SphereGeometry(0.06, 14, 10), C.shoes, 0, -0.19, 0.025);
+        shoe.scale.set(1, 0.6, 1.4);
+        leg.add(knee);
+        r.body.add(leg);
+        r.legs.push(leg); r.knees.push(knee);
+        // 腕: 肩から下がる
+        const arm = new THREE.Group();
+        arm.position.set(s * 0.17, 0.3, 0);
+        resMesh(arm, new THREE.CylinderGeometry(0.045, 0.04, 0.26, 12), C.shirt, 0, -0.13, 0);
+        resMesh(arm, new THREE.SphereGeometry(0.045, 12, 10), C.skin, 0, -0.28, 0);
+        r.body.add(arm);
+        r.arms.push(arm);
+    }
+    // 胴（服）とおしり
+    resMesh(r.body, new THREE.CylinderGeometry(0.13, 0.16, 0.36, 18), C.shirt, 0, 0.16, 0);
+    resMesh(r.body, new THREE.SphereGeometry(0.155, 18, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), C.pants, 0, 0.0, 0);
+    resMesh(r.body, new THREE.SphereGeometry(0.13, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2), C.shirt, 0, 0.34, 0);
+    // 頭
+    r.head.position.y = 0.53;
+    r.body.add(r.head);
+    resMesh(r.head, new THREE.SphereGeometry(0.17, 24, 18), C.skin, 0, 0, 0);
+    const hair = resMesh(r.head, new THREE.SphereGeometry(0.182, 24, 14, 0, Math.PI * 2, 0, Math.PI * 0.56), C.hair, 0, 0.01, -0.015);
+    hair.rotation.x = -0.42; // 前髪を上げて顔を見せる
+    const bun = resMesh(r.head, new THREE.SphereGeometry(0.07, 14, 10), C.hair, 0, 0.12, -0.13);
+    bun.scale.set(1, 1, 0.9);
+    for (const s of [-1, 1]) {
+        const eye = resMesh(r.head, new THREE.SphereGeometry(0.022, 10, 8), C.eye, s * 0.062, -0.005, 0.155);
+        eye.scale.set(1, 1.3, 0.6);
+        const cheek = resMesh(r.head, new THREE.SphereGeometry(0.03, 10, 8), C.cheek, s * 0.1, -0.05, 0.13);
+        cheek.scale.set(1, 0.6, 0.4);
+    }
+    // 足元の影（床に落とす薄い丸）
+    const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.2, 24), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.12, depthWrite: false }));
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.012;
+    resident.shadow = shadow;
+    scene.add(shadow);
+}
+buildResident();
+
+// ---- 歩ける場所（0.25m のマス目） ----
+const NAV_N = Math.round(N * CELL / RES.nav);
+function navCenter(i) { return -HALF + (i + 0.5) * RES.nav; }
+function navIndex(v) { return Math.min(NAV_N - 1, Math.max(0, Math.floor((v + HALF) / RES.nav))); }
+// ふさがっているマス（床に置く家具の上と、壁ぎわ）
+function buildNavGrid() {
+    const g = new Uint8Array(NAV_N * NAV_N);
+    const rects = game.items.filter(it => kindOf(it) === 'floor').map(it => {
+        const [fw, fd] = footprint(it);
+        return [it.gx * CELL - HALF, it.gz * CELL - HALF, (it.gx + fw) * CELL - HALF, (it.gz + fd) * CELL - HALF];
+    });
+    const R = RES.radius;
+    for (let j = 0; j < NAV_N; j++) for (let i = 0; i < NAV_N; i++) {
+        const x = navCenter(i), z = navCenter(j);
+        let b = i === 0 || j === 0 || i === NAV_N - 1 || j === NAV_N - 1;
+        for (const [x0, z0, x1, z1] of rects) {
+            if (b) break;
+            if (x > x0 - R && x < x1 + R && z > z0 - R && z < z1 + R) b = true;
+        }
+        g[j * NAV_N + i] = b ? 1 : 0;
+    }
+    return g;
+}
+function navFree(g, x, z) {
+    if (Math.abs(x) > HALF || Math.abs(z) > HALF) return false;
+    return !g[navIndex(z) * NAV_N + navIndex(x)];
+}
+// 2 点の間をまっすぐ歩けるか
+function navLine(g, ax, az, bx, bz) {
+    const d = Math.hypot(bx - ax, bz - az), n = Math.ceil(d / 0.06);
+    for (let k = 1; k <= n; k++) if (!navFree(g, ax + (bx - ax) * k / n, az + (bz - az) * k / n)) return false;
+    return true;
+}
+// いちばん近い空いているマスの中心
+function navNearestFree(g, x, z) {
+    let best = null, bd = Infinity;
+    for (let j = 0; j < NAV_N; j++) for (let i = 0; i < NAV_N; i++) {
+        if (g[j * NAV_N + i]) continue;
+        const d = (navCenter(i) - x) ** 2 + (navCenter(j) - z) ** 2;
+        if (d < bd) { bd = d; best = { x: navCenter(i), z: navCenter(j) }; }
+    }
+    return best;
+}
+// A* で道を探し、まっすぐ歩ける所は間を省く。見つからなければ null
+function findPath(g, sx, sz, tx, tz) {
+    if (!navFree(g, tx, tz)) return null;
+    const si = navIndex(sx), sj = navIndex(sz), ti = navIndex(tx), tj = navIndex(tz);
+    const start = sj * NAV_N + si, goal = tj * NAV_N + ti;
+    const cost = new Float32Array(NAV_N * NAV_N).fill(Infinity), from = new Int32Array(NAV_N * NAV_N).fill(-1);
+    const open = [[0, start]];
+    cost[start] = 0;
+    const h = (k) => Math.hypot(k % NAV_N - ti, Math.floor(k / NAV_N) - tj);
+    while (open.length) {
+        let bi = 0;
+        for (let k = 1; k < open.length; k++) if (open[k][0] < open[bi][0]) bi = k;
+        const [, cur] = open.splice(bi, 1)[0];
+        if (cur === goal) break;
+        const ci = cur % NAV_N, cj = Math.floor(cur / NAV_N);
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+            if (!di && !dj) continue;
+            const ni = ci + di, nj = cj + dj;
+            if (ni < 0 || nj < 0 || ni >= NAV_N || nj >= NAV_N) continue;
+            const nk = nj * NAV_N + ni;
+            if (g[nk] && nk !== start) continue;
+            if (di && dj && (g[cj * NAV_N + ni] || g[nj * NAV_N + ci])) continue; // 角をすり抜けない
+            const c = cost[cur] + (di && dj ? Math.SQRT2 : 1);
+            if (c >= cost[nk]) continue;
+            cost[nk] = c; from[nk] = cur;
+            open.push([c + h(nk), nk]);
+        }
+    }
+    if (goal !== start && from[goal] < 0) return null;
+    const cells = [];
+    for (let k = goal; k !== start && k >= 0; k = from[k]) cells.unshift(k);
+    const pts = cells.map(k => ({ x: navCenter(k % NAV_N), z: navCenter(Math.floor(k / NAV_N)) }));
+    if (pts.length) pts[pts.length - 1] = { x: tx, z: tz }; else pts.push({ x: tx, z: tz });
+    // 見通せる点まで飛ばす
+    const out = [];
+    let ax = sx, az = sz, k = 0;
+    while (k < pts.length) {
+        let far = k;
+        for (let m = pts.length - 1; m > k; m--) if (navLine(g, ax, az, pts[m].x, pts[m].z)) { far = m; break; }
+        out.push(pts[far]);
+        ax = pts[far].x; az = pts[far].z; k = far + 1;
+    }
+    return out;
+}
+
+// ---- これからすることを決める ----
+// 家具の向きでの位置 (lx, lz) を部屋の位置に直す
+function itemLocal(item, lx, lz) {
+    const c = itemCenter(item), a = -item.rot * Math.PI / 2;
+    return { x: c.x + lx * Math.cos(a) + lz * Math.sin(a), z: c.z - lx * Math.sin(a) + lz * Math.cos(a) };
+}
+function itemSig(item) { return item ? `${item.gx},${item.gz},${item.rot}` : ''; }
+// 家具を使うときの「近づく位置・向き・座る位置」の候補
+function plansFor(item) {
+    const u = RES_USES[item.type];
+    if (!u) return [];
+    const def = FURNITURE[item.type], kind = kindOf(item), front = -item.rot * Math.PI / 2;
+    const base = { uid: item.uid, sig: itemSig(item), act: u.act, use: u };
+    if (kind === 'wall') {
+        const { p, rotY } = wallPlacement(item);
+        const d = 0.6;
+        return [{ ...base, act: 'look', to: { x: p.x + Math.sin(rotY) * d, z: p.z + Math.cos(rotY) * d }, face: rotY + Math.PI }];
+    }
+    if (u.act === 'look') {
+        const lz = def.size[1] * CELL / 2 + (u.dist || 0.32);
+        if (kind === 'small' && !supportOf(item) && !u.dist) return [];
+        return [{ ...base, to: itemLocal(item, 0, lz), face: front + Math.PI }];
+    }
+    if (u.act === 'sit') {
+        return u.seats.map(([sx, sz]) => ({ ...base, to: itemLocal(item, sx, u.from), seat: itemLocal(item, sx, sz), face: front, top: u.top }));
+    }
+    // 寝る: ベッドの横から入る
+    return [-1, 1].map(s => ({ ...base, to: itemLocal(item, s * u.side, 0.1), seat: itemLocal(item, u.seats[0][0], u.seats[0][1]), face: front, top: u.top }));
+}
+function randIn([a, b]) { return a + Math.random() * (b - a); }
+function pickOne(list) { return list[Math.floor(Math.random() * list.length)]; }
+// 次にすることを選ぶ。prefer を渡すと、その家具を先に使う（置いたばかりの家具を見に行く）
+function chooseNext(prefer) {
+    const r = resident, g = buildNavGrid();
+    const tryPlans = (plans) => {
+        for (const p of plans.sort(() => Math.random() - 0.5)) {
+            const path = findPath(g, r.x, r.z, p.to.x, p.to.z);
+            if (path) return { plan: p, path };
+        }
+        return null;
+    };
+    let got = prefer ? tryPlans(plansFor(prefer)) : null;
+    if (!got && Math.random() < 0.72) {
+        const cands = game.items.filter(it => it.uid !== r.recentUid && plansFor(it).length);
+        // 座る・寝る家具は少し選ばれやすく
+        const weighted = cands.flatMap(it => (RES_USES[it.type]?.act !== 'look' ? [it, it] : [it]));
+        for (let n = 0; n < 4 && !got && weighted.length; n++) got = tryPlans(plansFor(pickOne(weighted)));
+    }
+    if (!got) {
+        // ぶらぶら歩く
+        for (let n = 0; n < 20 && !got; n++) {
+            const x = (Math.random() * 2 - 1) * (HALF - 0.5), z = (Math.random() * 2 - 1) * (HALF - 0.5);
+            if (Math.hypot(x - r.x, z - r.z) < 1) continue;
+            const path = findPath(g, r.x, r.z, x, z);
+            if (path) got = { plan: { act: 'wander', to: { x, z }, face: null }, path };
+        }
+    }
+    if (!got) { r.mode = 'idle'; r.timer = 2; return; }
+    r.plan = got.plan;
+    r.path = got.path;
+    r.mode = 'walk';
+    if (got.plan.uid) r.recentUid = got.plan.uid;
+}
+// 家具が消えた・動いたら、使うのをやめる
+function planValid(plan) {
+    if (!plan || !plan.uid) return true;
+    return itemSig(findItem(plan.uid)) === plan.sig;
+}
+// 立っている場所に家具が置かれたら、近くの空いている所へよける
+function stepAside(say) {
+    const r = resident, g = buildNavGrid();
+    if (!navFree(g, r.x, r.z)) {
+        const p = navNearestFree(g, r.x, r.z);
+        if (p) { r.x = p.x; r.z = p.z; r.hop = 1; }
+        if (say) residentSay(pickOne(['わっ', 'おっと', 'びっくりした']));
+    }
+}
+function stopUsing(say) {
+    const r = resident;
+    if (r.use) {
+        // 座っていた所から、近づいた位置へ戻る
+        const to = r.use.plan.to;
+        r.x = to.x; r.z = to.z;
+    }
+    r.use = null; r.plan = null; r.path = [];
+    r.mode = 'idle'; r.timer = 0.6;
+    stepAside(say);
+}
+function residentSay(text, sec = 2.6) {
+    resident.bubbleText = text;
+    resident.bubbleUntil = resident.t + sec; // 住人の時間で数える（テストで時間を進めても合うように）
+}
+
+// ---- 毎フレームの動き ----
+function turnTo(cur, target, k) {
+    let d = target - cur;
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    return cur + d * k;
+}
+let navCheck = 0;
+function updateResident(dt) {
+    const r = resident;
+    r.t += dt;
+    const follow = 1 - Math.exp(-dt * 10);
+    // 家具が動かされたら、やめる・よける（0.25 秒ごと）
+    navCheck -= dt;
+    if (navCheck <= 0) {
+        navCheck = 0.25;
+        if (!planValid(r.plan)) stopUsing(r.mode === 'use');
+        else if (r.mode !== 'use') {
+            const g = buildNavGrid();
+            if (!navFree(g, r.x, r.z)) stepAside(true);
+            else if (r.mode === 'walk' && r.path.length && !navLine(g, r.x, r.z, r.path[0].x, r.path[0].z)) {
+                const path = findPath(g, r.x, r.z, r.plan.to.x, r.plan.to.z);
+                if (path) r.path = path; else { r.plan = null; r.mode = 'idle'; r.timer = 0.5; }
+            }
+        }
+    }
+    let target = { leg: 0, knee: 0, arm: 0, armZ: 0.1, tilt: 0, y: 0 };
+    if (r.mode === 'idle') {
+        r.timer -= dt;
+        if (r.plan && r.plan.face !== null && r.plan.face !== undefined) r.face = turnTo(r.face, r.plan.face, follow);
+        if (r.timer <= 0) { r.plan = null; chooseNext(); }
+    } else if (r.mode === 'walk') {
+        const wp = r.path[0];
+        if (!wp) arrive();
+        else {
+            const dx = wp.x - r.x, dz = wp.z - r.z, d = Math.hypot(dx, dz);
+            const want = Math.atan2(dx, dz);
+            r.face = turnTo(r.face, want, 1 - Math.exp(-dt * 12));
+            const step = RES.speed * dt;
+            if (d <= step) { r.x = wp.x; r.z = wp.z; r.path.shift(); if (!r.path.length) arrive(); }
+            else { r.x += dx / d * step; r.z += dz / d * step; }
+            r.phase += dt * RES.speed * 9;
+            const s = Math.sin(r.phase);
+            target = { leg: s * 0.55, knee: Math.max(0, -Math.cos(r.phase)) * 0.5, arm: -s * 0.5, armZ: 0.12, tilt: 0, y: Math.abs(s) * 0.02 };
+        }
+    } else if (r.mode === 'use') {
+        const u = r.use, p = u.plan;
+        if (p.act === 'look') {
+            r.face = turnTo(r.face, p.face, follow);
+            u.time -= dt;
+            target.arm = Math.sin(r.t * 1.3) * 0.05;
+            if (u.time <= 0) { r.mode = 'idle'; r.use = null; r.plan = null; r.timer = randIn([0.5, 1.5]); }
+        } else {
+            // 座る・寝る: 向きを合わせてから腰を下ろす
+            r.face = turnTo(r.face, p.face, 1 - Math.exp(-dt * 8));
+            const turned = Math.abs(Math.atan2(Math.sin(p.face - r.face), Math.cos(p.face - r.face))) < 0.2;
+            if (!u.leaving && turned) u.k = Math.min(1, u.k + dt / 0.7);
+            if (u.leaving) u.k = Math.max(0, u.k - dt / 0.7);
+            if (u.k >= 1) u.time -= dt;
+            if (u.time <= 0 && !u.leaving) u.leaving = true;
+            const k = u.k, e = k * k * (3 - 2 * k);
+            r.x = p.to.x + (p.seat.x - p.to.x) * e;
+            r.z = p.to.z + (p.seat.z - p.to.z) * e;
+            const y = (p.top - RES.hip + 0.03) * e;
+            if (p.act === 'sit') target = { leg: -1.5 * e, knee: 1.45 * e, arm: -0.55 * e, armZ: 0.12, tilt: 0, y };
+            else target = { leg: 0, knee: 0.15 * e, arm: 0, armZ: 0.12 + 0.15 * e, tilt: (-Math.PI / 2 + 0.2) * e, y };
+            if (k >= 1 && p.act === 'lie' && r.bubbleUntil < r.t) r.bubbleText = '💤';
+            if (u.leaving && u.k <= 0) { r.mode = 'idle'; r.use = null; r.plan = null; r.timer = randIn([0.5, 1.2]); }
+        }
+    }
+    // 呼吸で少しだけ上下する・跳ねる
+    if (r.mode !== 'walk') target.arm += Math.sin(r.t * 2) * 0.03;
+    r.hop = Math.max(0, r.hop - dt * 2.5);
+    const hopY = Math.sin(r.hop * Math.PI) * 0.12;
+    // 歩くときの手足はそのまま、ほかはなめらかに近づける
+    for (const key of Object.keys(target)) {
+        const k = r.mode === 'walk' && key !== 'tilt' && key !== 'y' ? 1 : follow;
+        r.pose[key] += (target[key] - r.pose[key]) * k;
+    }
+    applyResidentPose(hopY);
+}
+function arrive() {
+    const r = resident, p = r.plan;
+    r.path = [];
+    if (!p || p.act === 'wander') {
+        r.mode = 'idle'; r.timer = randIn([1.5, 4]);
+        if (Math.random() < 0.15) residentSay(pickOne(RES_IDLE_LINES), 1.8);
+        return;
+    }
+    r.mode = 'use';
+    r.use = { plan: p, k: 0, time: randIn(p.use.time), leaving: false };
+    if (Math.random() < 0.6) residentSay(pickOne(p.use.lines));
+}
+function applyResidentPose(hopY = 0) {
+    const r = resident, P = r.pose;
+    r.root.position.set(r.x, P.y + hopY, r.z);
+    r.root.rotation.y = r.face;
+    r.body.rotation.x = P.tilt;
+    const walk = r.mode === 'walk'; // 歩くときは左右を逆に振る
+    r.legs[0].rotation.x = P.leg; r.legs[1].rotation.x = walk ? -P.leg : P.leg;
+    r.knees[0].rotation.x = P.knee; r.knees[1].rotation.x = walk ? Math.max(0, Math.cos(r.phase)) * 0.5 : P.knee;
+    r.arms[0].rotation.x = P.arm; r.arms[1].rotation.x = walk ? -P.arm : P.arm;
+    r.arms[0].rotation.z = -P.armZ; r.arms[1].rotation.z = P.armZ;
+    r.head.rotation.x = r.mode === 'use' && r.use?.plan.act === 'look' ? -0.12 : 0;
+    r.shadow.position.set(r.x, r.shadow.position.y, r.z);
+    r.shadow.visible = r.root.visible && P.y < 0.05;
+}
+
+// ---- 吹き出し ----
+const bubble = document.getElementById('bubble');
+function updateBubble() {
+    const r = resident, now = r.t;
+    const show = r.root.visible && r.bubbleText && (now < r.bubbleUntil || (r.bubbleText === '💤' && r.use?.plan.act === 'lie'));
+    if (!show) {
+        if (!bubble.hidden) bubble.hidden = true;
+        if (now >= r.bubbleUntil && r.bubbleText !== '💤') r.bubbleText = '';
+        if (r.bubbleText === '💤' && r.use?.plan.act !== 'lie') r.bubbleText = '';
+        return;
+    }
+    r.head.updateWorldMatrix(true, false);
+    const p = new THREE.Vector3(0, 0.26, 0).applyMatrix4(r.head.matrixWorld);
+    if (r.use?.plan.act === 'lie') p.y += 0.12;
+    p.project(camera);
+    const rect = canvas.getBoundingClientRect(), vr = view.getBoundingClientRect();
+    bubble.style.left = `${rect.left - vr.left + (p.x + 1) / 2 * rect.width}px`;
+    bubble.style.top = `${rect.top - vr.top + (1 - p.y) / 2 * rect.height}px`;
+    if (bubble.textContent !== r.bubbleText) bubble.textContent = r.bubbleText;
+    bubble.hidden = false;
+}
+
+// ---- 動かし続ける ----
+let residentFrame = 0;
+function residentTick(now) {
+    residentFrame = 0;
+    const r = resident;
+    if (!r.enabled) return;
+    residentFrame = requestAnimationFrame(residentTick);
+    if (now - r.lastDraw < 1000 / RES.fps - 2) return;
+    const dt = Math.min(0.1, (now - (r.last || now)) / 1000);
+    r.last = now; r.lastDraw = now;
+    if (!r.frozen) updateResident(dt);
+    updateBubble();
+    renderer.render(scene, camera);
+}
+function setResidentEnabled(on) {
+    const r = resident;
+    r.enabled = on;
+    r.root.visible = on && !r.frozen;
+    r.shadow.visible = r.root.visible;
+    if (!on) { bubble.hidden = true; cancelAnimationFrame(residentFrame); residentFrame = 0; requestRender(); return; }
+    if (!residentFrame) { r.last = 0; residentFrame = requestAnimationFrame(residentTick); }
+}
+// 部屋の真ん中に近い空いている所に立つ
+function spawnResident() {
+    const r = resident, p = navNearestFree(buildNavGrid(), 0, 0.3) || { x: 0, z: 0 };
+    r.x = p.x; r.z = p.z; r.face = 0;
+    r.mode = 'idle'; r.timer = 1.5; r.plan = null; r.use = null; r.path = [];
+    applyResidentPose();
+}
+// 住人を押したら、話す・跳ねる
+function pickResident(x, y) {
+    const r = resident;
+    if (!r.root.visible) return null;
+    r.root.updateMatrixWorld(true);
+    raycaster.setFromCamera(ndc(x, y), camera);
+    const hit = raycaster.intersectObject(r.root, true)[0];
+    return hit ? hit.distance : null;
+}
+function residentInFront(x, y) {
+    const rd = pickResident(x, y);
+    if (rd === null) return false;
+    const hit = raycaster.intersectObjects(furnitureRoot.children, true).find(h => {
+        let o = h.object;
+        while (o && o.userData.uid === undefined) o = o.parent;
+        const it = o && o.visible && findItem(o.userData.uid);
+        return it && !FURNITURE[it.type].flat;
+    });
+    return !hit || rd < hit.distance;
+}
+function talkToResident() {
+    const r = resident;
+    r.hop = 1;
+    const p = r.use?.plan;
+    if (p?.act === 'lie') { residentSay(pickOne(['むにゃ…', 'あと 5 分…', 'Zzz…'])); return; }
+    residentSay(p && Math.random() < 0.5 ? pickOne(p.use.lines) : pickOne(RES_GREETINGS));
+    // 歩いている途中なら、少し立ち止まって振り向く
+    if (r.mode === 'walk' || r.mode === 'idle') {
+        const cp = camera.position;
+        r.plan = { act: 'wander', to: { x: r.x, z: r.z }, face: Math.atan2(cp.x - r.x, cp.z - r.z) };
+        r.path = [];
+        r.mode = 'idle'; r.timer = 2.2;
+    }
+}
+// 新しく置いた家具に気づく
+function residentNotice(item) {
+    const r = resident;
+    if (!r.enabled || r.mode === 'use' || !plansFor(item).length) return;
+    setTimeout(() => {
+        if (r.mode === 'use' || !findItem(item.uid)) return;
+        chooseNext(findItem(item.uid));
+        if (r.plan?.uid === item.uid) residentSay(`${FURNITURE[item.type].name}だ！`);
+    }, 600);
+}
+
 // ---------- 起動 ----------
 loadGame();
 applyAppearance();
@@ -2033,6 +2541,8 @@ updateHistoryButtons();
 updateSnapButton();
 updateCamera();
 resize();
+spawnResident();
+setResidentEnabled(game.resident);
 document.getElementById('version').textContent = `v${APP_VERSION}`;
 
 setInterval(saveGame, 10000);
@@ -2072,6 +2582,18 @@ window.__lifemaker = {
     findCoplanarFaces, testBox: box, supportOf, splitTv, pickItem: (x, y, r) => pickItem(x, y, r)?.uid ?? null, save: saveGame, smallBase, kindOf, walls: () => walls.map(w => !w.hidden), updateCamera, rebuildAll,
     viewShift: () => viewShift, visibleOf: (uid) => objects.get(uid).visible,
     meshColors: (uid) => { const s = new Set(); objects.get(uid).traverse(o => { if (o.isMesh) s.add('#' + o.material.color.getHexString()); }); return [...s]; },
+    resident: {
+        state: () => { const r = resident; return { x: r.x, z: r.z, mode: r.mode, act: r.plan?.act ?? null, uid: r.plan?.uid ?? null, k: r.use?.k ?? 0, y: r.pose.y, visible: r.root.visible, bubble: bubble.hidden ? null : bubble.textContent, path: r.path.map(p => ({ ...p })) }; },
+        // テストで住人を止める（hide: ほかのテストの指の操作に当たらないよう隠す）
+        freeze(on = true, hide = on) { resident.frozen = on; resident.root.visible = resident.enabled && !hide; resident.shadow.visible = resident.root.visible; if (on) bubble.hidden = true; },
+        place(x, z) { Object.assign(resident, { x, z, mode: 'idle', timer: 99, plan: null, use: null, path: [] }); applyResidentPose(); },
+        go(uid) { chooseNext(findItem(uid)); return resident.plan?.uid === uid; },
+        step(sec) { for (let t = 0; t < sec; t += 0.05) updateResident(0.05); updateBubble(); renderer.render(scene, camera); },
+        free: (x, z) => navFree(buildNavGrid(), x, z),
+        line: (ax, az, bx, bz) => navLine(buildNavGrid(), ax, az, bx, bz),
+        screen() { resident.root.updateMatrixWorld(true); const p = new THREE.Vector3(0, 0.7, 0).applyMatrix4(resident.root.matrixWorld).project(camera); const r = canvas.getBoundingClientRect(); return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height }; },
+        talk: talkToResident,
+    },
     game: () => game, selected: () => selectedUid, cam, addItem, savePreset, loadPreset, openColorDialog, setHsl, hslOf, undo, redo, showTab, history: () => ({ undo: undoStack.length, redo: redoStack.length }), hslToHex, filter, rotateSelected, removeSelected, select, isBlocked, footprint, APP_VERSION, FURNITURE,
     // 家具の中心が画面のどこに映るか（クライアント座標）
     screenOf(uid, height = 0.3) {
