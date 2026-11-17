@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.10.1';
+const APP_VERSION = '0.10.2';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 3; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに
 
@@ -22,7 +22,8 @@ function unP(x, yy, y = 0) {
 // ---------- 家具の定義 ----------
 // 絵は「正面が左下（+gz）」で描く。rot 1 は左右反転（正面が右下）。斜め上からの見た目では、左右反転は gx と gz の入れ替えになる
 // size: [gx 方向, gz 方向]（マス）。壁掛けは [壁に沿った幅, 0]
-// art: img/ の絵。足元の四角の横幅に合わせて縮める。fitHeight（m）があれば、その高さに合わせる
+// art: img/ の絵（置き方は artMatrix）。fitHeight（m）: 丸い物・細い物の高さ（底の真ん中を足元の四角の真ん中に置く）。
+// legInset: 脚が天板より内側にある家具（丸いテーブル）で、脚の広がりを足元の四角の幅の何割にするか
 // small: 小物（上に物を置ける家具 = top のある家具の上に載る。prefer の家具の上を先に探す）
 // wall: 壁掛け（rot 0 は右奥の壁、rot 1 は左奥の壁。y は下端の高さ m）
 // flat: 敷物（上に家具を重ねて置ける）。top: 天面の高さ（m）
@@ -32,18 +33,18 @@ const FURNITURE = {
     sofa: { name: 'ソファ', size: [4, 2], art: 'sofa', use: 'sit', seats: [0.3, 0.7], lines: ['ふう、ひと休み', 'このソファ、ふかふか', 'のんびりしよう'] },
     chair: { name: 'いす', size: [1, 1], art: 'chair', use: 'sit', seats: [0.5], lines: ['ちょっと座ろう', 'いすがちょうどいい'] },
     table: { name: 'テーブル', size: [2, 3], art: 'table', top: 0.78, use: 'look', lines: ['ごはん、何にしよう', 'お茶にしよう'] },
-    lowtable: { name: 'ローテーブル', size: [2, 2], art: 'lowtable', fitHeight: 0.45, top: 0.42, use: 'look', lines: ['いい香り', 'ひと息つこう'] },
+    lowtable: { name: 'ローテーブル', size: [2, 2], art: 'lowtable', legInset: 0.75, top: 0.42, use: 'look', lines: ['いい香り', 'ひと息つこう'] },
     desk: { name: '机', size: [2, 1], art: 'desk', top: 0.72, use: 'look', lines: ['ちょっと調べもの', 'がんばるぞ'] },
     bookshelf: { name: '本棚', size: [2, 1], art: 'bookshelf', use: 'look', lines: ['何を読もうかな', 'この本、おもしろそう'] },
     wardrobe: { name: 'クローゼット', size: [2, 1], art: 'wardrobe', use: 'look', lines: ['今日は何を着よう', 'おしゃれしたいな'] },
     chest: { name: 'チェスト', size: [2, 1], art: 'chest', top: 0.88, use: 'look', lines: ['何をしまったっけ'] },
     nightstand: { name: 'サイドテーブル', size: [1, 1], art: 'nightstand', top: 0.6 },
     tvstand: { name: 'テレビ台', size: [3, 1], art: 'tvstand', top: 0.5, use: 'look', lines: ['なに見ようかな'] },
-    lamp: { name: 'スタンドライト', size: [1, 1], art: 'lamp' },
-    lamp2: { name: 'スタンドライト（フリンジ）', size: [1, 1], art: 'lamp2' },
-    plant: { name: '観葉植物', size: [1, 1], art: 'plant', use: 'look', lines: ['水やりしなきゃ', '葉っぱがきれい'] },
-    plant2: { name: '観葉植物（小）', size: [1, 1], art: 'plant2', use: 'look', lines: ['すくすく育ってる', '葉っぱがきれい'] },
-    vase2: { name: '花びん（大）', size: [1, 1], art: 'vase2', use: 'look', lines: ['いい香り', 'きれいに咲いてる'] },
+    lamp: { name: 'スタンドライト', size: [1, 1], art: 'lamp', fitHeight: 1.65 },
+    lamp2: { name: 'スタンドライト（フリンジ）', size: [1, 1], art: 'lamp2', fitHeight: 1.65 },
+    plant: { name: '観葉植物', size: [1, 1], art: 'plant', fitHeight: 1.1, use: 'look', lines: ['水やりしなきゃ', '葉っぱがきれい'] },
+    plant2: { name: '観葉植物（小）', size: [1, 1], art: 'plant2', fitHeight: 0.75, use: 'look', lines: ['すくすく育ってる', '葉っぱがきれい'] },
+    vase2: { name: '花びん（大）', size: [1, 1], art: 'vase2', fitHeight: 0.75, use: 'look', lines: ['いい香り', 'きれいに咲いてる'] },
     rug: { name: 'ラグ', size: [3, 4], art: 'rug', flat: true },
     tv: { name: 'テレビ', size: [2, 1], art: 'tv', small: true, fitHeight: 0.5, prefer: 'tvstand', use: 'look', lines: ['テレビ見よう', 'この番組すき'] },
     vase: { name: '花びん', size: [1, 1], art: 'vase', small: true, fitHeight: 0.32, use: 'look', lines: ['お花、かわいい'] },
@@ -92,12 +93,11 @@ function footprint(item) {
     const [w, d] = FURNITURE[item.type].size;
     return item.rot ? [d, w] : [w, d];
 }
-// 壁掛けの絵の高さ（m）。絵を読んだあとは絵から求める
+// 壁掛けの絵の高さ（m）。絵を囲む平行四辺形（img/sprites.json の wall）の高さを、壁に沿った幅に合わせて縮めた長さ
 function wallHeight(def) {
-    const im = images.get(def.art);
-    if (!im) return 1;
-    const w = def.size[0];
-    return (im.h * (w * CELL_W / 2) / im.w - w * CELL_H / 2) / PX_PER_M;
+    const im = images.get(def.art), wb = spriteMeta[def.art]?.wall;
+    if (!im || !wb) return 1;
+    return (wb.b - wb.a) * (def.size[0] * CELL_W / 2 / im.w) / PX_PER_M;
 }
 function clampItem(item) {
     const def = FURNITURE[item.type];
@@ -388,34 +388,66 @@ function invert(m) {
     return [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det];
 }
 function apply(m, x, y) { return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; }
-// 家具の絵の置き方。床の角が分かっている絵は、脚の先の左端・右端・いちばん下を、足元の四角に合わせる（天板の出っ張りに惑わされない）。
-// それ以外は、足元の四角の横幅（fitHeight があれば高さ）に合わせて縮める。rot 1 は左右反転
+// 3 点の対応から行列を求める（ラグ・壁掛けのような平らな物だけ。立体の家具を変形すると、引き伸ばされて見える）
+function solveAffine(src, dst) {
+    const [[x0, y0], [x1, y1], [x2, y2]] = src, [[X0, Y0], [X1, Y1], [X2, Y2]] = dst;
+    const det = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+    const a = ((X1 - X0) * (y2 - y0) - (X2 - X0) * (y1 - y0)) / det;
+    const c = ((X2 - X0) * (x1 - x0) - (X1 - X0) * (x2 - x0)) / det;
+    const b = ((Y1 - Y0) * (y2 - y0) - (Y2 - Y0) * (y1 - y0)) / det;
+    const d = ((Y2 - Y0) * (x1 - x0) - (Y1 - Y0) * (x2 - x0)) / det;
+    return [a, b, c, d, X0 - a * x0 - c * y0, Y0 - b * x0 - d * y0];
+}
+// 家具の絵の置き方（img/sprites.json の測った値を使う）
+// - 壁掛け: 絵を囲む平行四辺形を、壁の上の四角に合わせる。絵の向き（右の壁向き・左の壁向き）と掛ける壁が違えば左右反転
+// - ラグ: 床に着く 3 つの角を、足元の四角の角に合わせる
+// - 床に着く角が分かる家具: 縦横同じ倍率で縮め、脚の先の左端・右端を足元の四角の左右の端（legInset があればその割合）に、いちばん下の脚の先を床に合わせる
+// - 丸い物・細い物（fitHeight）: その高さに縮め、底の真ん中を足元の四角の真ん中に置く
+// rot 1 は左右反転
 function artMatrix(item) {
-    const def = FURNITURE[item.type], im = images.get(def.art);
+    const def = FURNITURE[item.type], im = images.get(def.art), meta = spriteMeta[def.art] || {};
     const { gx, gz, w, d, lift } = placeOf(item);
     const src = tintedSource(def.art, item.tint);
     if (!im) return { m: [1, 0, 0, 1, 0, 0], im: null, src };
-    const flip = item.rot ? [-1, 0, 0, 1, im.w, 0] : [1, 0, 0, 1, 0, 0]; // 絵を左右反転
+    const W = im.w, flip = [-1, 0, 0, 1, W, 0];
+    const fp = (p) => [W - p[0], p[1]];
+    if (def.wall && meta.wall) {
+        let { s, a, b } = meta.wall;
+        const mirror = (s > 0) === !!item.rot; // 右の壁向きの絵を左の壁に掛ける（またはその逆）
+        if (mirror) { a += s * W; b += s * W; s = -s; }
+        const h = wallHeight(def), len = def.size[0];
+        // 絵の左端の上・左端の下・右端の下 → 壁の上の四角（画面の左端が、右の壁では始まり、左の壁では終わり）
+        const [s0, s1] = item.rot ? [item.gx + len, item.gx] : [item.gx, item.gx + len];
+        const Q = (along, y) => (item.rot ? P(0, along, y) : P(along, 0, y));
+        const m = solveAffine([[0, a], [0, b], [W, b + s * W]], [Q(s0, lift + h), Q(s0, lift), Q(s1, lift)]);
+        return { m: mirror ? mul(m, flip) : m, im, src };
+    }
     const L = P(gx, gz + d, lift), B = P(gx + w, gz + d, lift), R = P(gx + w, gz, lift);
-    const cs = spriteMeta[def.art]?.corners;
-    if (cs && !def.fitHeight) {
-        // 縦横同じ倍率で縮める（引き伸ばさない）。脚の先の左端・右端を足元の四角の左端・右端に、いちばん下の脚の先を床に合わせる
-        const f = (p) => apply(flip, p[0], p[1]);
-        const [sl, sb, sr] = item.rot ? [f(cs[2]), f(cs[1]), f(cs[0])] : cs; // 反転した絵では、左右の角が入れ替わる
-        const k = (R[0] - L[0]) / (sr[0] - sl[0]);
-        const m = [k, 0, 0, k, L[0] - sl[0] * k, B[1] - sb[1] * k];
-        return { m: mul(m, flip), im, src };
+    const cs = meta.corners;
+    if (cs) {
+        const [sl, sb, sr] = item.rot ? [fp(cs[2]), fp(cs[1]), fp(cs[0])] : cs; // 反転した絵では、左右の角が入れ替わる
+        let m;
+        if (def.flat) m = solveAffine([sl, sb, sr], [L, B, R]);
+        else {
+            // 脚の広がりを足元の四角の幅（legInset があればその割合）に合わせ、真ん中をそろえる
+            const f = def.legInset || 1, C = P(gx + w / 2, gz + d / 2, lift);
+            const k = f * (R[0] - L[0]) / (sr[0] - sl[0]);
+            m = [k, 0, 0, k, (L[0] + R[0]) / 2 - (sl[0] + sr[0]) / 2 * k, C[1] + f * (B[1] - C[1]) - sb[1] * k];
+        }
+        return { m: item.rot ? mul(m, flip) : m, im, src };
     }
-    let k, x0, y0;
-    if (def.fitHeight) {
-        k = (def.fitHeight * PX_PER_M + (w + d) * CELL_H / 2) / im.h;
-        x0 = (L[0] + R[0]) / 2 - im.w * k / 2;
-    } else {
-        k = (R[0] - L[0]) / im.w;
-        x0 = L[0];
+    if (def.fitHeight && meta.base) {
+        // 底は、上から見ると丸いので、真ん中より少し手前（底の幅の縦の半分）が絵のいちばん下になる
+        const k = def.fitHeight * PX_PER_M / im.h;
+        let [bx, by, bw] = meta.base;
+        if (item.rot) bx = W - bx;
+        const C = P(gx + w / 2, gz + d / 2, lift);
+        const m = [k, 0, 0, k, C[0] - bx * k, C[1] + bw * k * (CELL_H / CELL_W) / 2 - by * k];
+        return { m: item.rot ? mul(m, flip) : m, im, src };
     }
-    y0 = B[1] - im.h * k;
-    return { m: mul([k, 0, 0, k, x0, y0], flip), im, src };
+    // 測った値がないとき: 足元の四角の横幅に合わせる
+    const k = (R[0] - L[0]) / W;
+    return { m: mul([k, 0, 0, k, L[0], B[1] - im.h * k], item.rot ? flip : [1, 0, 0, 1, 0, 0]), im, src };
 }
 // 絵の四角が部屋のどこに来るか（当たり判定・画面の位置合わせに使う）
 function boundsOf(mx) {

@@ -134,6 +134,8 @@ await test('家具を一覧から置ける（空いている場所に置かれ�
 
 await test('家具をドラッグで動かせて、保存される', async () => {
     const uid = await L('L.selected()');
+    // ほかの家具に隠れないよう、空いている所へ移しておく
+    await L(`(() => { const it = L.game().items.find(i => i.uid === ${uid}); it.gx = 8; it.gz = 7; L.render(); })()`);
     const before = await item(uid);
     const p = await L(`L.visiblePoint(${uid})`);
     assert(p, '家具の見えている所がない');
@@ -508,7 +510,7 @@ if (SHOT_DIR) {
     // 全部の家具を並べて、大きさがそろっているか見る
     await L(`(() => { const g = L.game(); g.items = []; let uid = 1, x = 0, z = 0, row = 0;
         for (const type of Object.keys(L.FURNITURE)) {
-            if (type === 'rug') continue;
+            if (type === 'rug' || L.kindOf({ type }) !== 'floor') continue;
             const [w, d] = L.FURNITURE[type].size;
             if (x + w > 10) { x = 0; z += row; row = 0; }
             g.items.push({ uid: uid++, type, gx: x, gz: z, rot: 0 }); x += w; row = Math.max(row, d);

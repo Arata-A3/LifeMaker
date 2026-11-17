@@ -5,6 +5,8 @@
 1. 床の角（corners）: 絵の下側の輪郭から、床に着く 3 つの角（左・手前・右）を探す。
    ゲームでは、左右の角を足元の四角の左右の端に、手前の角を床の高さに合わせて、縦横同じ倍率で縮める。
    調べる家具は CORNER_ITEMS だけ（丸い物・細い物・壁掛けは、角がはっきりしないので調べない）。
+   壁掛け（WALL_ITEMS）は、絵を囲む平行四辺形（wall）を求め、壁の上の四角に合わせる。
+   ほかの物は、底（base: 真ん中の x・いちばん下の y・幅）を求め、足元の四角の真ん中に置く。
 2. 色の部分（parts）: 線（ほぼ黒の紺）を除いた色を、似た色ごとに 2〜4 個にまとめる。
    img/<名前>_parts.png に、点ごとの部分の番号（0 は線で、色を変えない）を書く。
    部分の名前（「茶色」など）と代表の色は img/sprites.json に書く。
@@ -18,7 +20,8 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 GAME = ROOT / 'img'
-CORNER_ITEMS = {'bed', 'sofa', 'chair', 'table', 'desk', 'bookshelf', 'wardrobe', 'chest', 'nightstand', 'tvstand', 'rug'}
+CORNER_ITEMS = {'bed', 'sofa', 'chair', 'table', 'desk', 'bookshelf', 'wardrobe', 'chest', 'nightstand', 'tvstand', 'rug', 'lowtable'}
+WALL_ITEMS = {'window', 'window2', 'picture'}
 MAX_PARTS = 4
 LINE_L = 22          # これより暗い点は線（Lab の L）
 MERGE_DIST = 20      # 代表の色がこれより近い部分はまとめる（Lab の距離、明るさは軽く見る）
@@ -56,6 +59,34 @@ def corners(alpha):
     while k < len(hull) - 1 and (hull[k][1] - hull[k + 1][1]) / max(1, hull[k + 1][0] - hull[k][0]) < steep:
         k += 1
     return [list(hull[j]), list(hull[i]), list(hull[k])]
+
+
+# ---------- 底（丸い物・細い物） ----------
+def base(alpha):
+    """いちばん下の部分（植木鉢の底・脚の先）の真ん中の x、いちばん下の y、底の幅"""
+    ys, xs = np.nonzero(alpha)
+    bottom, h = ys.max(), ys.max() - ys.min()
+    near = ys >= bottom - max(4, h * 0.03)
+    wide = ys >= bottom - max(8, h * 0.1)
+    return [round(float(xs[near].mean()), 1), int(bottom), int(xs[wide].max() - xs[wide].min())]
+
+
+# ---------- 壁掛けの四角 ----------
+def wall_box(alpha):
+    """壁掛けの絵を囲む平行四辺形。辺の傾き s と、左端での上の辺 a・下の辺 b（y = a + s x、y = b + s x）"""
+    h, w = alpha.shape
+    cols = [x for x in range(w) if alpha[:, x].any()]
+    top = np.array([np.argmax(alpha[:, x]) for x in cols], dtype=np.float64)
+    bot = np.array([h - 1 - np.argmax(alpha[::-1, x]) for x in cols], dtype=np.float64)
+    xs = np.array(cols, dtype=np.float64)
+    mid = (xs > w * 0.2) & (xs < w * 0.8)  # 端の飾り（カーテンのすそなど）は見ない
+    # 上の辺と下の辺のうち、まっすぐな方（ずれの小さい方）で傾きを測る（アーチの窓は上の辺が曲がっている）
+    fits = []
+    for edge in (top, bot):
+        k, c = np.polyfit(xs[mid], edge[mid], 1)
+        fits.append((float(np.sqrt(np.mean((edge[mid] - (k * xs[mid] + c)) ** 2))), float(k)))
+    s = min(fits)[1]
+    return {'s': round(s, 4), 'a': round(float((top - s * xs).min()), 1), 'b': round(float((bot - s * xs).max()), 1)}
 
 
 # ---------- 色の部分 ----------
@@ -169,13 +200,18 @@ def main():
             continue
         img = Image.open(path).convert('RGBA')
         entry = {}
+        alpha = np.asarray(img)[..., 3] > 128
         if name in CORNER_ITEMS:
-            entry['corners'] = corners(np.asarray(img)[..., 3] > 128)
+            entry['corners'] = corners(alpha)
+        elif name in WALL_ITEMS:
+            entry['wall'] = wall_box(alpha)
+        else:
+            entry['base'] = base(alpha)
         mask, info = parts(img)
         Image.fromarray(mask, 'L').save(GAME / f'{name}_parts.png', optimize=True)
         entry['parts'] = info
         meta[name] = entry
-        print(f"{name}: {', '.join(p['name'] for p in info)}" + (f"  角 {entry['corners']}" if 'corners' in entry else ''))
+        print(f"{name}: {', '.join(p['name'] for p in info)}  " + json.dumps({k: v for k, v in entry.items() if k != 'parts'}))
     (GAME / 'sprites.json').write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding='utf-8')
 
 
