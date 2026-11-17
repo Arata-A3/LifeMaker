@@ -20,7 +20,7 @@
 <meta property="og:image:height" content="512">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="css/style.css?v=0.10.6">
+<link rel="stylesheet" href="css/style.css?v=0.11.0">
 </head>
 <body>
 <div id="app">
@@ -45,6 +45,7 @@
                 <span id="sel-name"></span>
                 <button id="rotate-btn">⇆ 向き</button>
                 <button id="color-btn">🎨 色</button>
+                <button id="fit-btn" hidden>📐 合わせる</button>
                 <button id="remove-btn">しまう</button>
                 <button id="done-btn">完了</button>
             </div>
@@ -70,6 +71,10 @@
         <label><input type="radio" name="appearance" value="auto"> 端末に合わせる</label>
         <label><input type="radio" name="appearance" value="light"> ライト</label>
         <label><input type="radio" name="appearance" value="dark"> ダーク</label>
+    </fieldset>
+    <fieldset>
+        <legend>作る人向け</legend>
+        <label class="check"><input type="checkbox" id="fit-mode-toggle"> 家具の合わせ方を直す「📐 合わせる」を出す</label>
     </fieldset>
     <button id="clear-room-btn">部屋を空にする</button>
     <button id="reset-btn" class="danger">全てのデータを消す</button>
@@ -100,8 +105,32 @@
     <button id="preset-close" class="wide">閉じる</button>
 </dialog>
 
+<dialog id="fit-dialog" class="sheet">
+    <h2><span id="fit-name"></span>の合わせ方</h2>
+    <p id="fit-help" class="fit-help"></p>
+    <canvas id="fit-canvas"></canvas>
+    <div class="fit-row">
+        <div id="fit-points" class="fit-points" role="group" aria-label="動かす点"></div>
+        <button id="fit-zoom" class="tint-part" aria-pressed="false">🔍 拡大</button>
+    </div>
+    <div class="fit-nudge" role="group" aria-label="選んだ点を少し動かす">
+        <button data-nudge="-1,0" aria-label="左へ">←</button>
+        <button data-nudge="0,-1" aria-label="上へ">↑</button>
+        <button data-nudge="0,1" aria-label="下へ">↓</button>
+        <button data-nudge="1,0" aria-label="右へ">→</button>
+    </div>
+    <div id="fit-num-row" class="tint-row" hidden><label for="fit-num" id="fit-num-label"></label><output id="fit-num-val"></output><input id="fit-num" type="range"></div>
+    <p id="fit-status" class="fit-help"></p>
+    <div class="tint-actions">
+        <button id="fit-revert">開いたときに戻す</button>
+        <button id="fit-clear">直した値を消す</button>
+        <button id="fit-export">書き出す</button>
+        <button id="fit-close" class="primary">閉じる</button>
+    </div>
+</dialog>
+
 <div id="toast" role="status"></div>
 
-<script type="module" src="js/app.js?v=0.10.6"></script>
+<script type="module" src="js/app.js?v=0.11.0"></script>
 </body>
 </html>

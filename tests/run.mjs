@@ -76,7 +76,7 @@ async function clearSave() {
     await sleep(200);
     await send('Page.navigate', { url: BASE + 'tests/blank.html' });
     await sleep(200);
-    await evaluate(`localStorage.removeItem('lifemaker2d_save'); localStorage.removeItem('lifemaker2d_save_corrupted')`);
+    await evaluate(`['lifemaker2d_save', 'lifemaker2d_save_corrupted', 'lifemaker2d_fit', 'lifemaker2d_fitmode'].forEach(k => localStorage.removeItem(k))`);
 }
 async function mouse(type, x, y, buttons = 1) {
     await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
@@ -336,6 +336,92 @@ await test('色合いは部分ごとにも変えられる', async () => {
     assert(!(await item(2)).tint, '元の色に戻らない');
     await evaluate(`document.getElementById('tint-close').click()`);
     await sleep(50);
+});
+
+await test('合わせ方のボタンは、設定で出したときだけ出る', async () => {
+    await L('L.select(4)');
+    assert(await evaluate(`document.getElementById('fit-btn').hidden`), 'ふだんから出ている');
+    await evaluate(`document.getElementById('menu-btn').click()`);
+    await evaluate(`document.getElementById('fit-mode-toggle').click()`);
+    await evaluate(`document.getElementById('menu-close').click()`);
+    assert(!(await evaluate(`document.getElementById('fit-btn').hidden`)), '設定で出しても出ない');
+    assert(await evaluate(`localStorage.getItem('lifemaker2d_fitmode')`) === '1', '設定が残らない');
+    // ボタンが増えても、下のバーが画面からはみ出さない
+    const tb = await evaluate(`(() => { const r = document.getElementById('toolbar').getBoundingClientRect(), b = document.getElementById('done-btn').getBoundingClientRect(); return { l: r.left, r: r.right, done: b.right, w: innerWidth }; })()`);
+    assert(tb.l >= 0 && tb.r <= tb.w && tb.done <= tb.r, '下のバーがはみ出す: ' + JSON.stringify(tb));
+    await shot('fit_toolbar');
+});
+
+await test('床の家具の合わせ方を直すと部屋の絵が動き、開いたときに戻せる', async () => {
+    await L('L.select(4)'); // ソファ
+    const m0 = await L('L.artMatrix(4)');
+    await evaluate(`document.getElementById('fit-btn').click()`);
+    assert(await evaluate(`document.getElementById('fit-dialog').open`), '画面が開かない');
+    const st = await L('L.fit().state');
+    assert(st.kind === 'corners' && st.pts.length === 3, '床の 3 つの点が出ない: ' + JSON.stringify(st));
+    assert(!(await evaluate(`document.getElementById('fit-num-row').hidden`)), '脚の広がりが出ない');
+    await shot('fit');
+    // 右の点を右へ動かすと、絵の倍率が変わる
+    await evaluate(`document.querySelectorAll('#fit-points button')[2].click()`);
+    for (let i = 0; i < 5; i++) await evaluate(`document.querySelector('#fit-dialog [data-nudge="1,0"]').click()`);
+    const m1 = await L('L.artMatrix(4)');
+    assert(Math.abs(m1[0] - m0[0]) > 1e-4, '倍率が変わらない');
+    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker2d_fit') || '{}').sofa`);
+    assert(saved?.corners?.[2]?.[0] === st.pts[2][0] + 10, 'この端末に残らない: ' + JSON.stringify(saved));
+    // 点をドラッグで動かす（指を置いた所に飛ばず、動かした分だけ動く）
+    const before = (await L('L.fit().state')).pts[1];
+    const p = await L('L.fitPointScreen(1)');
+    await dragMouse({ x: p.x + 3, y: p.y + 3 }, { x: p.x + 3, y: p.y + 23 });
+    const after = (await L('L.fit().state')).pts[1];
+    assert(Math.abs(after[0] - before[0]) < 0.5 && after[1] > before[1] + 5, 'ドラッグで動かない: ' + JSON.stringify([before, after]));
+    assert((await L('L.fit().state')).sel === 1, 'ドラッグした点が選ばれない');
+    // 拡大すると、選んだ点が真ん中に来る
+    await evaluate(`document.getElementById('fit-zoom').click()`);
+    const c = await evaluate(`(() => { const r = document.getElementById('fit-canvas').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    const pz = await L('L.fitPointScreen(1)');
+    assert(Math.abs(pz.x - c.x) < 1 && Math.abs(pz.y - c.y) < 1, '拡大しても真ん中に来ない');
+    await evaluate(`document.getElementById('fit-revert').click()`);
+    const m2 = await L('L.artMatrix(4)');
+    assert(m2.every((v, i) => Math.abs(v - m0[i]) < 1e-6), '開いたときに戻らない');
+    assert(!(await evaluate(`localStorage.getItem('lifemaker2d_fit')`)), '戻しても値が残る');
+    await evaluate(`document.getElementById('fit-close').click()`);
+});
+
+await test('壁掛けの合わせ方は 4 つの角で直せ、直した値を消すと元に戻る', async () => {
+    await L('L.select(6)'); // 窓
+    const m0 = await L('L.artMatrix(6)');
+    await evaluate(`document.getElementById('fit-btn').click()`);
+    const st = await L('L.fit().state');
+    assert(st.kind === 'face' && st.pts.length === 4, '4 つの角が出ない');
+    assert(JSON.stringify(st.pts) === JSON.stringify(await L('L.fit().base.window.face')), 'img/fit.json の値が出ない');
+    await evaluate(`document.querySelector('#fit-dialog [data-nudge="0,-1"]').click()`);
+    assert(JSON.stringify(await L('L.artMatrix(6)')) !== JSON.stringify(m0), '絵が動かない');
+    assert(!(await evaluate(`document.getElementById('fit-clear').disabled`)), '消すボタンが押せない');
+    // 書き出すと、全部の家具の値が入った JSON になる
+    const text = await L('L.exportFit()');
+    const all = JSON.parse(text);
+    assert(all.window.face[0][1] === st.pts[0][1] - 2 && all.picture && all.window2, '書き出した中身がおかしい: ' + text);
+    await evaluate(`document.getElementById('fit-clear').click()`);
+    assert(JSON.stringify(await L('L.artMatrix(6)')) === JSON.stringify(m0), '消しても戻らない');
+    await evaluate(`document.getElementById('fit-close').click()`);
+});
+
+await test('丸い物は底の点と高さで直せ、開き直しても残る', async () => {
+    const uid = await L(`(() => { L.addItem('plant2'); return L.selected(); })()`);
+    const m0 = await L(`L.artMatrix(${uid})`);
+    await evaluate(`document.getElementById('fit-btn').click()`);
+    assert((await L('L.fit().state')).kind === 'base', '底の点にならない');
+    await evaluate(`(() => { const i = document.getElementById('fit-num'); i.value = 1.5; i.dispatchEvent(new Event('input')); })()`);
+    const m1 = await L(`L.artMatrix(${uid})`);
+    assert(m1[0] > m0[0] * 1.5, '高さで大きくならない');
+    await evaluate(`document.getElementById('fit-close').click()`);
+    await L('L.save()');
+    await open();
+    const m2 = await L(`L.artMatrix(${uid})`);
+    assert(Math.abs(m2[0] - m1[0]) < 1e-6, '開き直すと戻ってしまう');
+    await evaluate(`localStorage.removeItem('lifemaker2d_fit')`);
+    await open();
+    await L(`L.select(${uid}) || L.removeSelected()`);
 });
 
 await test('しまうと消える', async () => {

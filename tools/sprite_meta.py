@@ -7,6 +7,8 @@
    調べる家具は CORNER_ITEMS だけ（丸い物・細い物・壁掛けは、角がはっきりしないので調べない）。
    壁掛け（WALL_ITEMS）は、絵を囲む平行四辺形（wall）を求め、壁の上の四角に合わせる。
    ほかの物は、底（base: 真ん中の x・いちばん下の y・幅）を求め、足元の四角の真ん中に置く。
+   自動で求めた値がずれるときは、ゲームの「合わせる」で手で直す。手で直した値は img/fit.json にあり、
+   ゲームではこちらが優先される（絵を作り直したら、その絵の分は直し直す）。
 2. 色の部分（parts）: 線（ほぼ黒の紺）を除いた色を、似た色ごとに 2〜4 個にまとめる。
    img/<名前>_parts.png に、点ごとの部分の番号（0 は線で、色を変えない）を書く。
    部分の名前（PART_NAMES の「布団」「枠」など）と代表の色は img/sprites.json に書く。
@@ -22,14 +24,6 @@ ROOT = Path(__file__).resolve().parent.parent
 GAME = ROOT / 'img'
 CORNER_ITEMS = {'bed', 'sofa', 'chair', 'table', 'desk', 'bookshelf', 'wardrobe', 'chest', 'nightstand', 'tvstand', 'rug', 'lowtable'}
 WALL_ITEMS = {'window', 'window2', 'picture'}
-# 壁掛けの本体（窓枠・額縁の正面）の 4 つの角 [左上, 右上, 左下, 右下]。img/<名前>.webp の上の位置（目で読み取った値）。
-# ゲームでは、この四角を壁の上の四角に合わせる（カーテン・レール・アーチなどの飾りは、外にはみ出してよい）。
-# 絵を作り直したら、読み取り直す
-WALL_FACES = {
-    'picture': [[7, 17], [442, 220], [5, 365], [440, 585]],
-    'window': [[30, 20], [402, 157], [30, 416], [402, 594]],   # 左端と右下はカーテンに隠れているので、見えている線を延ばした所
-    'window2': [[27, 250], [270, 135], [30, 570], [270, 427]],  # アーチの付け根を上の辺にする
-}
 MAX_PARTS = 4
 # 部分の名前（面積の大きい順）。部分の数が合わないとき（絵を作り直したときなど）は、色の名前にして知らせる
 PART_NAMES = {
@@ -224,6 +218,8 @@ def name_parts(name, info):
 
 def main():
     meta = {}
+    fit_path = GAME / 'fit.json'
+    fitted = json.loads(fit_path.read_text(encoding='utf-8')) if fit_path.exists() else {}
     for path in sorted(GAME.glob('*.webp')):
         name = path.stem
         if name.startswith('resident_'):
@@ -234,7 +230,7 @@ def main():
         if name in CORNER_ITEMS:
             entry['corners'] = corners(alpha)
         elif name in WALL_ITEMS:
-            entry['wall'] = {'face': WALL_FACES[name]} if name in WALL_FACES else wall_box(alpha)
+            entry['wall'] = wall_box(alpha)
         else:
             entry['base'] = base(alpha)
         mask, info = parts(img, LINE_L_BY.get(name, LINE_L), MAX_PARTS_BY.get(name, MAX_PARTS))
@@ -243,6 +239,8 @@ def main():
         entry['parts'] = info
         meta[name] = entry
         print(f"{name}: {', '.join(p['name'] for p in info)}  " + json.dumps({k: v for k, v in entry.items() if k != 'parts'}))
+        if name in fitted:
+            print(f'  ※ {name}: 手で直した合わせ方（img/fit.json）があります。絵を作り直したなら、ゲームの「合わせる」で直し直してください')
     (GAME / 'sprites.json').write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding='utf-8')
 
 

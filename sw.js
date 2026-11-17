@@ -1,5 +1,5 @@
 // ネットワーク優先。オフラインのときだけ保存分を返す。
-const CACHE = 'lifemaker2d-v3';
+const CACHE = 'lifemaker2d-v4';
 const CORE = [
     './',
     'index.html',
@@ -12,6 +12,7 @@ const CORE = [
     ...['bed', 'sofa', 'chair', 'table', 'lowtable', 'desk', 'bookshelf', 'wardrobe', 'chest', 'nightstand', 'tvstand', 'lamp', 'lamp2', 'plant', 'plant2', 'vase2', 'rug', 'tv', 'vase', 'window', 'window2', 'picture'].flatMap(n => [`img/${n}.webp`, `img/${n}_parts.png`]),
     ...[1, 2, 3, 4, 5, 6, 7, 8].map(n => `img/resident_${n}.webp`),
     'img/sprites.json',
+    'img/fit.json',
 ];
 
 self.addEventListener('install', (e) => {

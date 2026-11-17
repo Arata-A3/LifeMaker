@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.10.6';
+const APP_VERSION = '0.11.0';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 3; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに
 
@@ -95,7 +95,7 @@ function footprint(item) {
 }
 // 壁掛けの本体の高さ（m）。本体の四角（img/sprites.json の wall.face）、なければ絵を囲む平行四辺形の高さを、壁に沿った幅に合わせて縮めた長さ
 function wallHeight(def) {
-    const im = images.get(def.art), wb = spriteMeta[def.art]?.wall;
+    const im = images.get(def.art), wb = metaOf(def.art).wall;
     if (!im || !wb) return 1;
     if (wb.face) {
         const [tl, tr, bl, br] = wb.face;
@@ -290,6 +290,46 @@ function findFreeSpot(item) {
 // 絵ごとに、当たり判定用の不透明の地図と、色の部分の地図（img/<名前>_parts.png）も作る
 const images = new Map(); // name → { img, w, h, alpha, data, parts }
 let spriteMeta = {};      // img/sprites.json: 床の角（corners）と色の部分（parts: [{ name, color }]）
+// 手で直した合わせ方（「📐 合わせる」）。img/fit.json（みんなの画面に出る）に、この端末で直した分（localStorage）を重ねる
+// { corners: [左, 手前, 右], face: [左上, 右上, 左下, 右下], base: [x, y, 幅], legInset, fitHeight }（点は絵の上の位置）
+const FIT_KEY = 'lifemaker2d_fit';
+let fitBase = {}, fitLocal = {}, fitVersion = 0;
+function cleanFit(v) {
+    const out = {};
+    if (!v || typeof v !== 'object') return out;
+    const pts = (a, n) => Array.isArray(a) && a.length === n && a.every(p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+    for (const [art, e] of Object.entries(v)) {
+        if (!e || typeof e !== 'object') continue;
+        const o = {};
+        if (pts(e.corners, 3)) o.corners = e.corners;
+        if (pts(e.face, 4)) o.face = e.face;
+        if (Array.isArray(e.base) && e.base.length === 3 && e.base.every(Number.isFinite)) o.base = e.base;
+        for (const k of ['legInset', 'fitHeight']) if (Number.isFinite(e[k]) && e[k] > 0) o[k] = e[k];
+        if (Object.keys(o).length) out[art] = o;
+    }
+    return out;
+}
+function loadFitLocal() { try { fitLocal = cleanFit(JSON.parse(localStorage.getItem(FIT_KEY) || '{}')); } catch (e) { fitLocal = {}; } }
+function saveFitLocal() {
+    try { if (Object.keys(fitLocal).length) localStorage.setItem(FIT_KEY, JSON.stringify(fitLocal)); else localStorage.removeItem(FIT_KEY); } catch (e) { }
+}
+// この端末で直した値のうち、img/fit.json と同じになったもの（書き出して取り込んだもの）は消す
+function pruneFitLocal() {
+    for (const [art, e] of Object.entries(fitLocal)) {
+        for (const k of Object.keys(e)) if (JSON.stringify(e[k]) === JSON.stringify(fitBase[art]?.[k])) delete e[k];
+        if (!Object.keys(e).length) delete fitLocal[art];
+    }
+    saveFitLocal();
+}
+function fitOf(art) { return { ...fitBase[art], ...fitLocal[art] }; }
+// 置き方に使う値（自動で求めた img/sprites.json に、手で直した値を重ねる）
+function metaOf(art) {
+    const m = { ...spriteMeta[art] }, f = fitOf(art);
+    if (f.corners) m.corners = f.corners;
+    if (f.base) m.base = f.base;
+    if (f.face) m.wall = { ...m.wall, face: f.face };
+    return m;
+}
 function readPixels(img) {
     const c = document.createElement('canvas');
     c.width = img.naturalWidth; c.height = img.naturalHeight;
@@ -324,6 +364,9 @@ async function loadImage(name, withParts) {
 const RESIDENT_FRAMES = { stand: 1, walkA: 2, walkB: 3, back: 4, sit: 5, lie: 6, happy: 7, wave: 8 };
 async function loadAll() {
     try { spriteMeta = await (await fetch(`img/sprites.json?v=${APP_VERSION}`)).json(); } catch (e) { console.error(e); spriteMeta = {}; }
+    try { fitBase = cleanFit(await (await fetch(`img/fit.json?v=${APP_VERSION}`)).json()); } catch (e) { console.error(e); fitBase = {}; }
+    loadFitLocal();
+    pruneFitLocal();
     const jobs = Object.values(FURNITURE).map(d => loadImage(d.art, !!spriteMeta[d.art]?.parts));
     for (const n of Object.values(RESIDENT_FRAMES)) jobs.push(loadImage(`resident_${n}`, false));
     await Promise.all(jobs);
@@ -425,7 +468,7 @@ function fitAffine(src, dst) {
 // - 丸い物・細い物（fitHeight）: その高さに縮め、底の真ん中を足元の四角の真ん中に置く
 // rot 1 は左右反転
 function artMatrix(item) {
-    const def = FURNITURE[item.type], im = images.get(def.art), meta = spriteMeta[def.art] || {};
+    const def = FURNITURE[item.type], im = images.get(def.art), meta = metaOf(def.art), fit = fitOf(def.art);
     const { gx, gz, w, d, lift } = placeOf(item);
     const src = tintedSource(def.art, item.tint);
     if (!im) return { m: [1, 0, 0, 1, 0, 0], im: null, src };
@@ -462,15 +505,16 @@ function artMatrix(item) {
         if (def.flat) m = solveAffine([sl, sb, sr], [L, B, R]);
         else {
             // 脚の広がりを足元の四角の幅（legInset があればその割合）に合わせ、真ん中をそろえる
-            const f = def.legInset || 1, C = P(gx + w / 2, gz + d / 2, lift);
+            const f = (fit.legInset ?? def.legInset) || 1, C = P(gx + w / 2, gz + d / 2, lift);
             const k = f * (R[0] - L[0]) / (sr[0] - sl[0]);
             m = [k, 0, 0, k, (L[0] + R[0]) / 2 - (sl[0] + sr[0]) / 2 * k, C[1] + f * (B[1] - C[1]) - sb[1] * k];
         }
         return { m: item.rot ? mul(m, flip) : m, im, src };
     }
-    if (def.fitHeight && meta.base) {
+    const fitHeight = fit.fitHeight ?? def.fitHeight;
+    if (fitHeight && meta.base) {
         // 底は、上から見ると丸いので、真ん中より少し手前（底の幅の縦の半分）が絵のいちばん下になる
-        const k = def.fitHeight * PX_PER_M / im.h;
+        const k = fitHeight * PX_PER_M / im.h;
         let [bx, by, bw] = meta.base;
         if (item.rot) bx = W - bx;
         const C = P(gx + w / 2, gz + d / 2, lift);
@@ -709,7 +753,7 @@ function worldTransform(g) {
     g.setTransform(s, 0, 0, s, (view.w / 2 - view.cx * view.scale) * view.dpr, (view.h / 2 - view.cy * view.scale) * view.dpr);
 }
 function renderBackground() {
-    const key = [view.scale, view.cx, view.cy, view.w, view.h, view.dpr, selectedUid, JSON.stringify(game.items), images.size].join('|');
+    const key = [view.scale, view.cx, view.cy, view.w, view.h, view.dpr, selectedUid, JSON.stringify(game.items), images.size, fitVersion].join('|');
     if (key === bgKey && bgCanvas.width === canvas.width && bgCanvas.height === canvas.height) return;
     bgKey = key;
     bgCanvas.width = canvas.width; bgCanvas.height = canvas.height;
@@ -826,6 +870,7 @@ function removeSelected() {
 }
 document.getElementById('rotate-btn').addEventListener('click', rotateSelected);
 document.getElementById('color-btn').addEventListener('click', () => openTint(selectedUid));
+document.getElementById('fit-btn').addEventListener('click', () => openFit(selectedUid));
 document.getElementById('remove-btn').addEventListener('click', removeSelected);
 document.getElementById('done-btn').addEventListener('click', () => select(null));
 window.addEventListener('keydown', (e) => {
@@ -1558,6 +1603,252 @@ function applyAppearance() {
 }
 darkQuery.addEventListener('change', applyAppearance);
 
+// ---------- 合わせ方の調整（作る人向け） ----------
+// 自動で求めた「床に着く点」「窓枠の角」などがずれるとき、絵の上の点を指で動かして直す。直すとすぐ部屋に出る。
+// 直した値はこの端末に残る。「書き出す」で fit.json を作り、img/fit.json に置き換えると、みんなの画面にも出る
+const FIT_MODE_KEY = 'lifemaker2d_fitmode';
+let fitMode = false;
+try { fitMode = localStorage.getItem(FIT_MODE_KEY) === '1'; } catch (e) { }
+const fitBtn = document.getElementById('fit-btn');
+function updateFitBtn() { fitBtn.hidden = !fitMode; }
+updateFitBtn();
+const fitDialog = document.getElementById('fit-dialog');
+const fitCanvas = document.getElementById('fit-canvas');
+const fitState = { art: null, def: null, kind: null, pts: [], sel: 0, zoom: false, cx: 0, cy: 0, before: null, drag: null };
+const FIT_ZOOM = 3;
+const FIT_LABELS = { corners: ['左', '手前', '右'], flat: ['左', '手前', '右'], face: ['左上', '右上', '左下', '右下'], base: ['底'] };
+const FIT_HELP = {
+    corners: '床に着く 3 つの点（左・手前・右の脚の先）を、絵の上で合わせます。左と右の点の幅が足元の四角の幅に、手前の点が床の高さになります。',
+    flat: '敷物の 3 つの角（左・手前・右）を合わせます。この 3 つの角が、床の四角の角に重なります。',
+    face: '窓枠・額縁の 4 つの角を合わせます。この四角が、壁の上の四角にぴったり重なります（カーテンなどの飾りははみ出してよい）。',
+    base: '底の真ん中（床に着く所）を合わせます。大きさは「高さ」で決まります。',
+};
+function fitKind(def) {
+    if (def.wall) return 'face';
+    if (metaOf(def.art).corners) return def.flat ? 'flat' : 'corners';
+    return 'base';
+}
+// 今の点（絵の上の位置）
+function fitPoints(def, kind) {
+    const m = metaOf(def.art), im = images.get(def.art);
+    if (kind === 'face') {
+        if (m.wall?.face) return m.wall.face.map(p => [...p]);
+        const { s = 0, a = 0, b = im.h } = m.wall || {}, W = im.w; // 絵を囲む平行四辺形の角
+        return [[0, a], [W, a + s * W], [0, b], [W, b + s * W]];
+    }
+    if (kind === 'base') { const b = m.base || [im.w / 2, im.h - 1, im.w / 2]; return [[b[0], b[1]]]; }
+    return m.corners.map(p => [...p]);
+}
+// 数で直す値（脚の広がり・高さ）
+function fitNumber() {
+    const { kind, def } = fitState;
+    if (kind === 'corners') return { key: 'legInset', min: 0.4, max: 1.3, step: 0.01, def: def.legInset || 1, label: '脚の広がり（足元の幅に対して）', fmt: v => `${Math.round(v * 100)}%` };
+    if (kind === 'base' && def.fitHeight) return { key: 'fitHeight', min: 0.1, max: 2.5, step: 0.01, def: def.fitHeight, label: '高さ', fmt: v => `${v.toFixed(2)} m` };
+    return null;
+}
+function fitApplied() {
+    fitVersion++;
+    for (const it of game.items) if (FURNITURE[it.type].art === fitState.art && kindOf(it) === 'wall') clampItem(it); // 壁掛けは高さが変わる
+    saveFitLocal();
+    drawFitCanvas();
+    updateFitStatus();
+    requestRender();
+}
+// 動かした点を、この端末の値に書く
+function fitStore() {
+    const { art, kind, pts } = fitState, r = (v) => Math.round(v * 10) / 10;
+    const e = { ...fitLocal[art] }, P2 = pts.map(p => [r(p[0]), r(p[1])]);
+    if (kind === 'face') e.face = P2;
+    else if (kind === 'base') e.base = [P2[0][0], P2[0][1], (metaOf(art).base || [0, 0, images.get(art).w / 2])[2]];
+    else e.corners = P2;
+    fitLocal[art] = e;
+    fitApplied();
+}
+function fitScale() {
+    const im = images.get(fitState.art), k = Math.min(fitCanvas.clientWidth / im.w, fitCanvas.clientHeight / im.h) * 0.9;
+    return fitState.zoom ? k * FIT_ZOOM : k;
+}
+// 絵の点 → 合わせ方の画面の点（CSS px）
+function fitToCanvas(p) {
+    const k = fitScale();
+    return [(p[0] - fitState.cx) * k + fitCanvas.clientWidth / 2, (p[1] - fitState.cy) * k + fitCanvas.clientHeight / 2];
+}
+// 拡大しているときは選んだ点を、していないときは絵の真ん中を、画面の真ん中にする
+function fitCenter() {
+    const im = images.get(fitState.art);
+    [fitState.cx, fitState.cy] = fitState.zoom ? fitState.pts[fitState.sel] : [im.w / 2, im.h / 2];
+}
+function drawFitCanvas() {
+    if (!fitDialog.open || !fitState.art) return;
+    const cw = fitCanvas.clientWidth, ch = fitCanvas.clientHeight, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (!cw || !ch) return;
+    if (fitCanvas.width !== Math.round(cw * dpr) || fitCanvas.height !== Math.round(ch * dpr)) { fitCanvas.width = Math.round(cw * dpr); fitCanvas.height = Math.round(ch * dpr); }
+    const g = fitCanvas.getContext('2d'), im = images.get(fitState.art), k = fitScale(), [ox, oy] = fitToCanvas([0, 0]);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, cw, ch);
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(im.img, ox, oy, im.w * k, im.h * k);
+    const pts = fitState.pts.map(fitToCanvas), kind = fitState.kind;
+    g.lineWidth = 2; g.strokeStyle = '#d9774b'; g.setLineDash([6, 4]);
+    if (kind === 'face') { path(g, [pts[0], pts[1], pts[3], pts[2]]); g.stroke(); }
+    else if (kind === 'base') {
+        const bw = (metaOf(fitState.art).base || [0, 0, im.w / 2])[2] * k / 2;
+        g.beginPath(); g.moveTo(pts[0][0] - bw, pts[0][1]); g.lineTo(pts[0][0] + bw, pts[0][1]); g.stroke();
+    } else { g.beginPath(); g.moveTo(...pts[0]); g.lineTo(...pts[1]); g.lineTo(...pts[2]); g.stroke(); }
+    g.setLineDash([]);
+    g.font = 'bold 12px system-ui, sans-serif'; g.textAlign = 'center';
+    pts.forEach((p, i) => {
+        const on = i === fitState.sel;
+        g.beginPath(); g.arc(p[0], p[1], on ? 8 : 6, 0, Math.PI * 2);
+        g.fillStyle = on ? '#d9774b' : '#fff'; g.fill();
+        g.lineWidth = 2; g.strokeStyle = INK; g.stroke();
+        // 印の真ん中が分かるように、真ん中に小さな点
+        g.beginPath(); g.arc(p[0], p[1], 1.2, 0, Math.PI * 2); g.fillStyle = on ? '#fff' : INK; g.fill();
+        const label = FIT_LABELS[kind][i];
+        g.lineWidth = 3; g.strokeStyle = '#fff'; g.strokeText(label, p[0], p[1] - 13);
+        g.fillStyle = INK; g.fillText(label, p[0], p[1] - 13);
+    });
+}
+function renderFitPoints() {
+    const box = document.getElementById('fit-points');
+    box.innerHTML = '';
+    FIT_LABELS[fitState.kind].forEach((label, i) => {
+        const b = document.createElement('button');
+        b.className = 'tint-part';
+        b.textContent = label;
+        b.setAttribute('aria-pressed', String(i === fitState.sel));
+        b.addEventListener('click', () => selectFitPoint(i));
+        box.appendChild(b);
+    });
+    document.getElementById('fit-zoom').setAttribute('aria-pressed', String(fitState.zoom));
+}
+function selectFitPoint(i) {
+    fitState.sel = i;
+    if (fitState.zoom) fitCenter();
+    renderFitPoints();
+    drawFitCanvas();
+}
+const fitNum = document.getElementById('fit-num'), fitNumRow = document.getElementById('fit-num-row');
+function renderFitNumber() {
+    const n = fitNumber();
+    fitNumRow.hidden = !n;
+    if (!n) return;
+    document.getElementById('fit-num-label').textContent = n.label;
+    Object.assign(fitNum, { min: n.min, max: n.max, step: n.step });
+    fitNum.value = fitOf(fitState.art)[n.key] ?? n.def;
+    document.getElementById('fit-num-val').textContent = n.fmt(Number(fitNum.value));
+}
+function updateFitStatus() {
+    const art = fitState.art;
+    document.getElementById('fit-status').textContent = fitLocal[art] ? 'この端末で直した値を使っています（書き出して img/fit.json に入れるまで、ほかの端末には出ません）'
+        : fitBase[art] ? '手で直した値（img/fit.json）を使っています' : '自動で求めた値を使っています';
+    document.getElementById('fit-clear').disabled = !fitLocal[art];
+}
+// 値が外から変わったとき（戻す・消す）に、点と数を読み直す
+function reloadFit() {
+    fitState.kind = fitKind(fitState.def);
+    fitState.pts = fitPoints(fitState.def, fitState.kind);
+    fitState.sel = Math.min(fitState.sel, fitState.pts.length - 1);
+    fitCenter();
+    renderFitPoints();
+    renderFitNumber();
+    fitApplied();
+}
+function openFit(uid) {
+    const it = findItem(uid);
+    if (!it) return;
+    const def = FURNITURE[it.type];
+    if (!images.get(def.art)) return;
+    Object.assign(fitState, { art: def.art, def, kind: fitKind(def), sel: 0, zoom: false, drag: null, before: JSON.stringify(fitLocal[def.art] ?? null) });
+    fitState.pts = fitPoints(def, fitState.kind);
+    document.getElementById('fit-name').textContent = def.name;
+    document.getElementById('fit-help').textContent = FIT_HELP[fitState.kind];
+    renderFitPoints();
+    renderFitNumber();
+    updateFitStatus();
+    fitDialog.showModal();
+    fitCenter();
+    drawFitCanvas();
+    revealAbove(it, fitDialog);
+}
+// 点を動かす（指を置いた所に飛ばさず、動かした分だけ動かす。指で点が隠れても合わせやすい）
+fitCanvas.addEventListener('pointerdown', (e) => {
+    const r = fitCanvas.getBoundingClientRect(), x = e.clientX - r.left - fitCanvas.clientLeft, y = e.clientY - r.top - fitCanvas.clientTop;
+    let best = -1, bd = 32;
+    fitState.pts.forEach((p, i) => { const [px, py] = fitToCanvas(p), d = Math.hypot(px - x, py - y); if (d < bd) { bd = d; best = i; } });
+    if (best < 0) return;
+    e.preventDefault();
+    if (best !== fitState.sel) { fitState.sel = best; renderFitPoints(); }
+    fitState.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, p: [...fitState.pts[best]], k: fitScale() };
+    try { fitCanvas.setPointerCapture(e.pointerId); } catch (err) { }
+    drawFitCanvas();
+});
+fitCanvas.addEventListener('pointermove', (e) => {
+    const d = fitState.drag;
+    if (!d || d.id !== e.pointerId) return;
+    fitState.pts[fitState.sel] = [d.p[0] + (e.clientX - d.x) / d.k, d.p[1] + (e.clientY - d.y) / d.k];
+    fitStore();
+});
+const endFitDrag = (e) => { if (fitState.drag?.id === e.pointerId) fitState.drag = null; };
+fitCanvas.addEventListener('pointerup', endFitDrag);
+fitCanvas.addEventListener('pointercancel', endFitDrag);
+// 選んだ点を少しずつ動かす（拡大しているときは 1 押しで 1 ドット、していないときは 2 ドット）
+function nudgeFit(dx, dy) {
+    const step = fitState.zoom ? 1 : 2, p = fitState.pts[fitState.sel];
+    fitState.pts[fitState.sel] = [p[0] + dx * step, p[1] + dy * step];
+    if (fitState.zoom) fitCenter();
+    fitStore();
+}
+document.querySelectorAll('#fit-dialog [data-nudge]').forEach(b => b.addEventListener('click', () => { const [dx, dy] = b.dataset.nudge.split(',').map(Number); nudgeFit(dx, dy); }));
+fitDialog.addEventListener('keydown', (e) => {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!d || e.target.closest('input')) return;
+    e.preventDefault();
+    const n = e.shiftKey ? 10 : 1;
+    nudgeFit(d[0] * n, d[1] * n);
+});
+document.getElementById('fit-zoom').addEventListener('click', () => {
+    fitState.zoom = !fitState.zoom;
+    fitCenter();
+    renderFitPoints();
+    drawFitCanvas();
+});
+fitNum.addEventListener('input', () => {
+    const n = fitNumber();
+    if (!n) return;
+    fitLocal[fitState.art] = { ...fitLocal[fitState.art], [n.key]: Number(fitNum.value) };
+    document.getElementById('fit-num-val').textContent = n.fmt(Number(fitNum.value));
+    fitApplied();
+});
+document.getElementById('fit-revert').addEventListener('click', () => {
+    const v = JSON.parse(fitState.before);
+    if (v) fitLocal[fitState.art] = v; else delete fitLocal[fitState.art];
+    reloadFit();
+});
+document.getElementById('fit-clear').addEventListener('click', () => {
+    delete fitLocal[fitState.art];
+    reloadFit();
+});
+// 全部の家具の手で直した値を、fit.json として書き出す（img/fit.json に置き換える）
+function exportFit() {
+    const arts = [...new Set([...Object.keys(fitBase), ...Object.keys(fitLocal)])].sort();
+    const text = '{\n' + arts.map(a => ` ${JSON.stringify(a)}: ${JSON.stringify(fitOf(a))}`).join(',\n') + '\n}\n';
+    try {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+        a.download = 'fit.json';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        toast('fit.json を書き出しました');
+    } catch (e) { console.error(e); }
+    return text;
+}
+document.getElementById('fit-export').addEventListener('click', exportFit);
+document.getElementById('fit-close').addEventListener('click', () => fitDialog.close());
+fitDialog.addEventListener('click', (e) => { if (e.target === fitDialog) fitDialog.close(); });
+fitDialog.addEventListener('close', () => { fitState.drag = null; restoreView(); });
+new ResizeObserver(drawFitCanvas).observe(fitCanvas);
+
 // ---------- 設定 ----------
 const menu = document.getElementById('menu');
 const nameInput = document.getElementById('resident-name');
@@ -1565,6 +1856,7 @@ document.getElementById('menu-btn').addEventListener('click', () => {
     menu.querySelectorAll('input[name="appearance"]').forEach(r => { r.checked = r.value === game.appearance; });
     document.getElementById('resident-toggle').checked = game.resident.show;
     nameInput.value = game.resident.name;
+    document.getElementById('fit-mode-toggle').checked = fitMode;
     menu.showModal();
 });
 document.getElementById('menu-close').addEventListener('click', () => menu.close());
@@ -1584,6 +1876,11 @@ document.getElementById('resident-toggle').addEventListener('change', (e) => {
     setResidentShown(game.resident.show);
     saveGame();
 });
+document.getElementById('fit-mode-toggle').addEventListener('change', (e) => {
+    fitMode = e.target.checked;
+    try { if (fitMode) localStorage.setItem(FIT_MODE_KEY, '1'); else localStorage.removeItem(FIT_MODE_KEY); } catch (err) { }
+    updateFitBtn();
+});
 document.getElementById('clear-room-btn').addEventListener('click', () => {
     if (!confirm('部屋の家具を全部しまいますか？')) return;
     game.items = [];
@@ -1594,7 +1891,7 @@ document.getElementById('clear-room-btn').addEventListener('click', () => {
 document.getElementById('reset-btn').addEventListener('click', () => {
     if (!confirm('全てのデータを消しますか？（元に戻せません）')) return;
     resetting = true;
-    [SAVE_KEY, SAVE_KEY + '_corrupted'].forEach(k => { try { localStorage.removeItem(k); } catch (e) { } });
+    [SAVE_KEY, SAVE_KEY + '_corrupted', FIT_KEY, FIT_MODE_KEY].forEach(k => { try { localStorage.removeItem(k); } catch (e) { } });
     location.reload();
 });
 
@@ -1720,7 +2017,11 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 window.__lifemaker = {
     APP_VERSION, FURNITURE, ready, game: () => game, selected: () => selectedUid, view,
     addItem, select, rotateSelected, removeSelected, isBlocked, footprint, supportOf: (uid) => supportOf(findItem(uid))?.uid ?? null,
-    undo, redo, savePreset, loadPreset, zoomAt, openTint, kindOf,
+    undo, redo, savePreset, loadPreset, zoomAt, openTint, kindOf, openFit, metaOf, exportFit,
+    fit: () => ({ base: fitBase, local: fitLocal, state: { art: fitState.art, kind: fitState.kind, sel: fitState.sel, pts: fitState.pts.map(p => [...p]) } }),
+    artMatrix: (uid) => artMatrix(findItem(uid)).m,
+    // 合わせ方の画面の点が、画面のどこに映るか（クライアント座標）
+    fitPointScreen(i) { const [x, y] = fitToCanvas(fitState.pts[i]), r = fitCanvas.getBoundingClientRect(); return { x: r.left + fitCanvas.clientLeft + x, y: r.top + fitCanvas.clientTop + y }; },
     history: () => ({ undo: undoStack.length, redo: redoStack.length }), save: saveGame, render, renders: () => renderCount,
     drawOrder: () => drawList.map(o => o.resident ? 'resident' : o.item.uid),
     // 家具の絵の真ん中（h は絵の高さの割合。0 が上、1 が下）が画面のどこに映るか（クライアント座標）
