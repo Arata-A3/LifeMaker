@@ -213,14 +213,18 @@ def parts_seeded(img, line_l, seeds, names):
     alpha = a[..., 3] > 128
     rgb = a[..., :3][alpha].astype(np.float64)
     lab = rgb_to_lab(rgb)
-    color = lab[:, 0] >= line_l
+    # 線（紺色）も目安の色の 1 つにして、線か塗りかを色の近さで決める（夜空のガラスのような暗い塗りを、線にしないため）。
+    # 目安の色は動かさず（線の色は決まっているので）、とても暗い点だけは必ず線にする
+    color = lab[:, 0] >= min(line_l, 12)
     x = feature(lab[color])
+    line = feature(rgb_to_lab(np.array([[47, 43, 64]], dtype=np.float64)))[0]
     c = feature(rgb_to_lab(np.array([[int(h[k:k + 2], 16) for k in (1, 3, 5)] for h in seeds], dtype=np.float64)))
     for _ in range(25):
-        ids = np.argmin(((x[:, None, :] - c[None]) ** 2).sum(-1), axis=1)
-        c = np.array([x[ids == i].mean(0) if np.any(ids == i) else c[i] for i in range(len(c))])
+        allc = np.vstack([line[None], c])
+        ids = np.argmin(((x[:, None, :] - allc[None]) ** 2).sum(-1), axis=1)  # 0 は線
+        c = np.array([x[ids == i + 1].mean(0) if np.any(ids == i + 1) else c[i] for i in range(len(c))])
     flat = np.zeros(len(rgb), dtype=np.uint8)
-    flat[color] = ids + 1
+    flat[color] = ids
     mask = np.zeros(alpha.shape, dtype=np.uint8)
     mask[alpha] = flat
     info = []

@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.15.0';
+const APP_VERSION = '0.16.0';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 4; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに / 4: お金・持ち物・ゲームの中の日・お店
 
@@ -746,6 +746,32 @@ function drawMatrix(g, m, src, srcW) {
     g.drawImage(s.c, 0, 0);
     g.restore();
 }
+// 絵の形を暗くした版（厚みの側面に使う）
+const darkCache = new WeakMap();
+function darkSilhouette(src) {
+    if (darkCache.has(src)) return darkCache.get(src);
+    const c = document.createElement('canvas');
+    c.width = src.width || src.naturalWidth; c.height = src.height || src.naturalHeight;
+    const g = c.getContext('2d');
+    g.drawImage(src, 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = 'rgba(35, 24, 18, 0.5)';
+    g.fillRect(0, 0, c.width, c.height);
+    darkCache.set(src, c);
+    return c;
+}
+// 厚みのある板として描く: dir（部屋の点で、側面が見える向き）へ depth まで暗い側面を重ね、最初の 1 枚に影を付けてから、絵を描く
+function drawSlab(g, item, dir, depth, shadow) {
+    const mx = artMatrix(item);
+    if (!mx.im) return;
+    const dark = darkSilhouette(mx.src), at = (t) => { const m = [...mx.m]; m[4] += dir[0] * t; m[5] += dir[1] * t; return m; };
+    g.save();
+    Object.assign(g, shadow);
+    drawMatrix(g, at(depth), dark, mx.im.w);
+    g.restore();
+    for (let t = depth - 0.5; t > 0; t -= 0.5) drawMatrix(g, at(t), dark, mx.im.w);
+    drawMatrix(g, mx.m, mx.src, mx.im.w);
+}
 function drawArt(g, item) {
     const mx = artMatrix(item);
     if (mx.im) drawMatrix(g, mx.m, mx.src, mx.im.w);
@@ -940,22 +966,16 @@ function renderBackground() {
     drawRoom(g);
     // 壁掛け → 敷物 → 選んだ印 → 床の家具の影
     const k = view.scale * view.dpr; // 影のずれ・ぼかしは画面の点で指定するので、拡大率をかける
+    // 平らな絵（壁掛け・真上から描いた敷物）に厚みを付ける: 絵の形を暗くした「側面」を、少しずつずらして何枚も重ねる
     for (const it of game.items) if (kindOf(it) === 'wall') {
-        // 壁掛け: 右下の壁に、やわらかい影を落とす（壁から少し浮いて見える）
-        g.save();
-        Object.assign(g, { shadowColor: 'rgba(45, 32, 22, 0.32)', shadowBlur: 5 * k, shadowOffsetX: 2.5 * k, shadowOffsetY: 4 * k });
-        drawArt(g, it);
-        g.restore();
+        // 壁掛け: 壁から手前に出た板のように見せる（壁の奥の向きへ側面を重ね、壁に影を落とす）
+        const n = it.rot ? [-0.866, -0.5] : [0.866, -0.5]; // 壁の奥の向き（画面の上で）
+        drawSlab(g, it, n, 3.5, { shadowColor: 'rgba(45, 32, 22, 0.35)', shadowBlur: 6 * k, shadowOffsetX: 3 * k, shadowOffsetY: 5 * k });
     }
     for (const it of game.items) if (kindOf(it) === 'flat') {
-        const top = FURNITURE[it.type].topdown;
-        if (top) {
-            // 真上から描いた敷物: 少し下にずらした暗い影で、手前のふちに厚みを付ける
-            g.save();
-            Object.assign(g, { shadowColor: 'rgba(55, 38, 26, 0.5)', shadowBlur: 1.5 * k, shadowOffsetX: 0, shadowOffsetY: 2.5 * k });
-        }
-        drawArt(g, it);
-        if (top) g.restore();
+        // 真上から描いた敷物: 床から少し盛り上がった布のように見せる（下へ側面を重ね、床に影を落とす）
+        if (FURNITURE[it.type].topdown) drawSlab(g, it, [0, 1], 3, { shadowColor: 'rgba(55, 38, 26, 0.4)', shadowBlur: 3 * k, shadowOffsetX: 0, shadowOffsetY: 1.5 * k });
+        else drawArt(g, it);
     }
     drawMarker(g);
     for (const it of game.items) if (kindOf(it) === 'floor') { const [w, d] = footprint(it); floorShadow(g, it.gx, it.gz, w, d); }
