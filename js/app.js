@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.16.0';
+const APP_VERSION = '0.17.0';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 4; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに / 4: お金・持ち物・ゲームの中の日・お店
 
@@ -746,7 +746,30 @@ function drawMatrix(g, m, src, srcW) {
     g.drawImage(s.c, 0, 0);
     g.restore();
 }
-// 絵の形を暗くした版（厚みの側面に使う）
+// ふちの色: 輪郭の少し内側（線を除く）の色の平均。厚みの側面をこの色にする（額縁なら木の色、ラグならふちの色）
+function rimColor(src) {
+    const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(src, 0, 0);
+    let d;
+    try { d = g.getImageData(0, 0, w, h).data; } catch (e) { return [120, 90, 70]; }
+    const R = Math.max(3, Math.round(Math.min(w, h) * 0.03)), r = Math.max(1, Math.round(R / 3)); // 輪郭からの近さ（絵の大きさに合わせる）
+    const op = (x, y) => x >= 0 && y >= 0 && x < w && y < h && d[(y * w + x) * 4 + 3] > 128;
+    let sr = 0, sg = 0, sb = 0, n = 0;
+    for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
+        if (!op(x, y)) continue;
+        const near = !op(x - R, y) || !op(x + R, y) || !op(x, y - R) || !op(x, y + R);
+        const deep = op(x - r, y) && op(x + r, y) && op(x, y - r) && op(x, y + r);
+        if (!near || !deep) continue;
+        const i = (y * w + x) * 4, lum = (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11);
+        if (lum < 60) continue; // 線（紺色）は数えない
+        sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; n++;
+    }
+    return n ? [sr / n, sg / n, sb / n] : [120, 90, 70];
+}
+// 絵の形を、ふちの色を暗くした色で塗った版（厚みの側面に使う）
 const darkCache = new WeakMap();
 function darkSilhouette(src) {
     if (darkCache.has(src)) return darkCache.get(src);
@@ -755,7 +778,8 @@ function darkSilhouette(src) {
     const g = c.getContext('2d');
     g.drawImage(src, 0, 0);
     g.globalCompositeOperation = 'source-atop';
-    g.fillStyle = 'rgba(35, 24, 18, 0.5)';
+    const [cr, cg, cb] = rimColor(src).map(v => Math.round(v * 0.68)); // 側面は光が当たりにくいので、少し暗く
+    g.fillStyle = `rgb(${cr}, ${cg}, ${cb})`;
     g.fillRect(0, 0, c.width, c.height);
     darkCache.set(src, c);
     return c;
@@ -1275,7 +1299,7 @@ function renderCatalog() {
     wrap.innerHTML = '';
     for (const [kind] of CATALOG_GROUPS) {
         for (const [type, def] of Object.entries(FURNITURE)) {
-            if (kindOf({ type }) !== kind || !game.owned[type]) continue;
+            if (kindOf({ type }) !== kind || !ownedCount(type)) continue;
             const b = document.createElement('button');
             b.className = 'item';
             b.dataset.type = type;
@@ -1301,7 +1325,7 @@ function renderCatalog() {
 function updateCatalogCounts() {
     for (const b of document.querySelectorAll('#items .item')) {
         const n = available(b.dataset.type);
-        b.querySelector('.item-count').textContent = n > 0 ? `あと ${n}` : '置いた';
+        b.querySelector('.item-count').textContent = allItems ? '' : n > 0 ? `あと ${n}` : '置いた';
         b.classList.toggle('used-up', n <= 0);
     }
 }
@@ -2137,11 +2161,16 @@ const USE_COINS = { lie: 20, sit: 10, look: 5 };
 const DAY_START_H = 7, DAY_END_H = 23;
 let economyReady = false; // 絵を読み終わるまでは時計を進めない
 function placedCount(type) { return game.items.filter(it => it.type === type).length; }
-function available(type) { return (game.owned[type] || 0) - placedCount(type); }
+// 作る人向けの「全部の家具を使う」: 持っている数に関係なく置ける（持ち物・お金のデータは変えない）
+const ALL_ITEMS_KEY = 'lifemaker2d_allitems';
+let allItems = false;
+try { allItems = localStorage.getItem(ALL_ITEMS_KEY) === '1'; } catch (e) { }
+function ownedCount(type) { return allItems ? 99 : (game.owned[type] || 0); }
+function available(type) { return ownedCount(type) - placedCount(type); }
 // 持っている数を超える家具を外す（プリセットを呼び出すときなど）
 function limitToOwned(items) {
     const used = {};
-    return items.filter(it => (used[it.type] = (used[it.type] || 0) + 1) <= (game.owned[it.type] || 0));
+    return items.filter(it => (used[it.type] = (used[it.type] || 0) + 1) <= ownedCount(it.type));
 }
 // その日の品ぞろえ。取り置きした品物は必ず並ぶ。ほかは、まだ持っていない家具が出やすい
 const MAX_RESERVED = 2;
@@ -2263,6 +2292,7 @@ document.getElementById('menu-btn').addEventListener('click', () => {
     document.getElementById('resident-toggle').checked = game.resident.show;
     nameInput.value = game.resident.name;
     document.getElementById('fit-mode-toggle').checked = fitMode;
+    document.getElementById('all-items-toggle').checked = allItems;
     menu.showModal();
 });
 document.getElementById('menu-close').addEventListener('click', () => menu.close());
@@ -2282,6 +2312,11 @@ document.getElementById('resident-toggle').addEventListener('change', (e) => {
     setResidentShown(game.resident.show);
     saveGame();
 });
+document.getElementById('all-items-toggle').addEventListener('change', (e) => {
+    allItems = e.target.checked;
+    try { if (allItems) localStorage.setItem(ALL_ITEMS_KEY, '1'); else localStorage.removeItem(ALL_ITEMS_KEY); } catch (err) { }
+    renderCatalog();
+});
 document.getElementById('fit-mode-toggle').addEventListener('change', (e) => {
     fitMode = e.target.checked;
     try { if (fitMode) localStorage.setItem(FIT_MODE_KEY, '1'); else localStorage.removeItem(FIT_MODE_KEY); } catch (err) { }
@@ -2297,7 +2332,7 @@ document.getElementById('clear-room-btn').addEventListener('click', () => {
 document.getElementById('reset-btn').addEventListener('click', () => {
     if (!confirm('全てのデータを消しますか？（元に戻せません）')) return;
     resetting = true;
-    [SAVE_KEY, SAVE_KEY + '_corrupted', FIT_KEY, FIT_MODE_KEY].forEach(k => { try { localStorage.removeItem(k); } catch (e) { } });
+    [SAVE_KEY, SAVE_KEY + '_corrupted', FIT_KEY, FIT_MODE_KEY, ALL_ITEMS_KEY].forEach(k => { try { localStorage.removeItem(k); } catch (e) { } });
     location.reload();
 });
 

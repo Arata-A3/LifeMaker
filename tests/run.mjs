@@ -78,7 +78,7 @@ async function clearSave() {
     await sleep(200);
     await send('Page.navigate', { url: BASE + 'tests/blank.html' });
     await sleep(200);
-    await evaluate(`['lifemaker2d_save', 'lifemaker2d_save_corrupted', 'lifemaker2d_fit', 'lifemaker2d_fitmode'].forEach(k => localStorage.removeItem(k))`);
+    await evaluate(`['lifemaker2d_save', 'lifemaker2d_save_corrupted', 'lifemaker2d_fit', 'lifemaker2d_fitmode', 'lifemaker2d_allitems'].forEach(k => localStorage.removeItem(k))`);
 }
 async function mouse(type, x, y, buttons = 1) {
     await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
@@ -447,6 +447,24 @@ await test('丸い物は底の点と高さで直せ、開き直しても残る',
     await evaluate(`localStorage.removeItem('lifemaker2d_fit')`);
     await open();
     await L(`L.select(${uid}) || L.removeSelected()`);
+});
+
+await test('「全部の家具を使う」をオンにすると、持っていない家具も置け、オフで戻る', async () => {
+    await clearSave();
+    await open('', { grant: false });
+    const n0 = await evaluate(`document.querySelectorAll('#items .item').length`);
+    await evaluate(`document.getElementById('menu-btn').click()`);
+    await evaluate(`document.getElementById('all-items-toggle').click()`);
+    await evaluate(`document.getElementById('menu-close').click()`);
+    assert(await evaluate(`document.querySelectorAll('#items .item').length`) === await L('Object.keys(L.FURNITURE).length'), '全部の家具が出ない');
+    await evaluate(`document.querySelector('#items .item[data-type="chair"]').click()`);
+    assert((await L('L.game().items')).some(i => i.type === 'chair'), '持っていない家具を置けない');
+    assert(!(await L('L.game().owned.chair')), '持ち物が増えてしまった');
+    await L('L.removeSelected()');
+    await evaluate(`document.getElementById('menu-btn').click()`);
+    await evaluate(`document.getElementById('all-items-toggle').click()`);
+    await evaluate(`document.getElementById('menu-close').click()`);
+    assert(await evaluate(`document.querySelectorAll('#items .item').length`) === n0, 'オフにしても戻らない');
 });
 
 await test('はじめは持っている家具だけが一覧に出て、置ききると置けない', async () => {
