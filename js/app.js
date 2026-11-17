@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.14.0';
+const APP_VERSION = '0.15.0';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 4; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに / 4: お金・持ち物・ゲームの中の日・お店
 
@@ -96,6 +96,7 @@ const ICON_PATHS = {
     palette: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.7-1.3-.7-2.1 0-.8.7-1.5 1.5-1.5H17a4 4 0 0 0 4-4c0-4.9-4-8.8-9-8.8z"/><circle cx="7.5" cy="11.5" r="1.1" fill="currentColor"/><circle cx="10" cy="7.5" r="1.1" fill="currentColor"/><circle cx="14.5" cy="7.5" r="1.1" fill="currentColor"/>',
     fit: '<circle cx="12" cy="12" r="6.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
     zoom: '<circle cx="11" cy="11" r="6.5"/><path d="M20.5 20.5l-4.8-4.8M11 8v6M8 11h6"/>',
+    dropper: '<path d="M15 4.5l4.5 4.5M17.2 2.8a1.9 1.9 0 0 1 2.7 0l1.3 1.3a1.9 1.9 0 0 1 0 2.7L18.5 9.5 14.5 5.5zM14.5 7.5L5.5 16.5 4 20l3.5-1.5 9-9"/>',
     trash: '<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5"/>',
     coin: '<circle cx="12" cy="12" r="9" fill="#e3b448" stroke="#9a6d12"/><circle cx="12" cy="12" r="5.5" fill="none" stroke="#9a6d12" stroke-width="1.5"/>',
 };
@@ -938,8 +939,24 @@ function renderBackground() {
     g.imageSmoothingQuality = 'high';
     drawRoom(g);
     // 壁掛け → 敷物 → 選んだ印 → 床の家具の影
-    for (const it of game.items) if (kindOf(it) === 'wall') drawArt(g, it);
-    for (const it of game.items) if (kindOf(it) === 'flat') drawArt(g, it);
+    const k = view.scale * view.dpr; // 影のずれ・ぼかしは画面の点で指定するので、拡大率をかける
+    for (const it of game.items) if (kindOf(it) === 'wall') {
+        // 壁掛け: 右下の壁に、やわらかい影を落とす（壁から少し浮いて見える）
+        g.save();
+        Object.assign(g, { shadowColor: 'rgba(45, 32, 22, 0.32)', shadowBlur: 5 * k, shadowOffsetX: 2.5 * k, shadowOffsetY: 4 * k });
+        drawArt(g, it);
+        g.restore();
+    }
+    for (const it of game.items) if (kindOf(it) === 'flat') {
+        const top = FURNITURE[it.type].topdown;
+        if (top) {
+            // 真上から描いた敷物: 少し下にずらした暗い影で、手前のふちに厚みを付ける
+            g.save();
+            Object.assign(g, { shadowColor: 'rgba(55, 38, 26, 0.5)', shadowBlur: 1.5 * k, shadowOffsetX: 0, shadowOffsetY: 2.5 * k });
+        }
+        drawArt(g, it);
+        if (top) g.restore();
+    }
     drawMarker(g);
     for (const it of game.items) if (kindOf(it) === 'floor') { const [w, d] = footprint(it); floorShadow(g, it.gx, it.gz, w, d); }
 }
@@ -1051,6 +1068,7 @@ document.getElementById('remove-btn').addEventListener('click', removeSelected);
 document.getElementById('done-btn').addEventListener('click', () => select(null));
 window.addEventListener('keydown', (e) => {
     if (e.target.closest('input, textarea') || document.querySelector('dialog[open]')) return;
+    if (picking) { if (e.key === 'Escape') endEyedrop(null); return; }
     const mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
     if (mod && key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
     if (mod && (key === 'y' || (key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return; }
@@ -1108,6 +1126,11 @@ function pinchInfo() {
 canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
+    if (picking) {
+        const rgb = colorAt(e.clientX, e.clientY);
+        if (rgb) endEyedrop(rgb); else toast('部屋の中を押してください');
+        return;
+    }
     canvas.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.size === 2) {
@@ -1275,12 +1298,12 @@ const TINT_PRESETS = [
 let tintUid = null, tintBefore = null, tintPart = 'all';
 // いま選んでいる部分（all は全部）の色合い
 function curTint(it) { return (tintPart === 'all' ? it.tint?.all : tintFor(it.tint, tintPart)) || TINT_DEFAULT; }
-function openTint(uid) {
+function openTint(uid, part = 'all', before = null) {
     const it = findItem(uid);
     if (!it) return;
     tintUid = uid;
-    tintPart = 'all';
-    tintBefore = JSON.stringify(it.tint || null);
+    tintPart = part;
+    tintBefore = before ?? JSON.stringify(it.tint || null);
     document.getElementById('tint-name').textContent = FURNITURE[it.type].name;
     renderTintParts(it);
     renderTintPresets(it);
@@ -1409,7 +1432,51 @@ document.getElementById('tint-reset').addEventListener('click', () => { const it
 document.getElementById('tint-revert').addEventListener('click', () => { setTint(sanitizeTint(JSON.parse(tintBefore))); saveGame(); });
 document.getElementById('tint-close').addEventListener('click', () => tintDialog.close());
 tintDialog.addEventListener('click', (e) => { if (e.target === tintDialog) tintDialog.close(); });
-tintDialog.addEventListener('close', () => { tintUid = null; restoreView(); saveGame(); });
+// close は少し遅れて届くので、そのあいだに開き直していたら何もしない（開き直した画面の家具を忘れてしまうため）
+tintDialog.addEventListener('close', () => { if (tintDialog.open) return; tintUid = null; if (!picking) restoreView(); saveGame(); });
+// ---- スポイト: 部屋の好きな所を押して、その色を選んでいる部分に当てる ----
+// 色合いは「元の色からの変え方」なので、部分の代表の色が取った色になるように、色合い・鮮やかさ・明るさを逆算する
+let picking = null; // { uid, part, before }
+const eyedropBar = document.getElementById('eyedrop-bar');
+function tintToReach(fromHex, rgb) {
+    const p = parseInt(fromHex.slice(1), 16);
+    const [fh, fs, fl] = rgbToHsl(((p >> 16) & 255) / 255, ((p >> 8) & 255) / 255, (p & 255) / 255);
+    const [th, ts, tl] = rgbToHsl(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
+    let dh = ((th - fh) * 360 + 540) % 360 - 180;
+    if (fs < 0.04 || ts < 0.04) dh = 0; // 灰色には色相がない
+    const ks = fs < 0.04 ? (ts < 0.04 ? 1 : 2) : ts / fs;
+    const kl = tl <= fl ? tl / Math.max(fl, 0.01) : 1 + (tl - fl) / (Math.max(1 - fl, 0.01) * 0.8);
+    return { h: dh, s: ks * 100, l: kl * 100 };
+}
+function startEyedrop() {
+    picking = { uid: tintUid, part: tintPart, before: tintBefore };
+    tintDialog.close();
+    eyedropBar.hidden = false;
+}
+function endEyedrop(rgb) {
+    const p = picking;
+    picking = null;
+    eyedropBar.hidden = true;
+    const it = findItem(p.uid);
+    if (!it) return;
+    openTint(p.uid, p.part, p.before);
+    if (!rgb) return;
+    const parts = partsOf(FURNITURE[it.type].art);
+    const from = (p.part === 'all' ? parts[0] : parts[p.part - 1])?.color;
+    if (!from) { toast('この家具はスポイトが使えません'); return; }
+    setTint(withPart(it, sanitizeOne(tintToReach(from, rgb))));
+    renderTintPresets(it);
+    saveGame();
+}
+// 画面の点の色（部屋の外は null）
+function colorAt(clientX, clientY) {
+    const c = canvas.getBoundingClientRect();
+    const d = ctx.getImageData(Math.round((clientX - c.left) * view.dpr), Math.round((clientY - c.top) * view.dpr), 1, 1).data;
+    return d[3] > 200 ? [d[0], d[1], d[2]] : null;
+}
+document.getElementById('tint-eyedrop').addEventListener('click', startEyedrop);
+document.getElementById('eyedrop-cancel').addEventListener('click', () => endEyedrop(null));
+
 
 // ---------- 住人 ----------
 // 部屋を歩き回り、家具を使う。位置は保存しない（開くたびに部屋の真ん中近くから始まる）
@@ -2038,7 +2105,7 @@ function exportFit() {
 document.getElementById('fit-export').addEventListener('click', exportFit);
 document.getElementById('fit-close').addEventListener('click', () => fitDialog.close());
 fitDialog.addEventListener('click', (e) => { if (e.target === fitDialog) fitDialog.close(); });
-fitDialog.addEventListener('close', () => { fitState.drag = null; restoreView(); });
+fitDialog.addEventListener('close', () => { if (fitDialog.open) return; fitState.drag = null; restoreView(); });
 new ResizeObserver(drawFitCanvas).observe(fitCanvas);
 
 // ---------- お金・ゲームの中の 1 日・お店 ----------
@@ -2344,6 +2411,7 @@ window.__lifemaker = {
     addItem(type) { if (available(type) <= 0) { game.owned[type] = (game.owned[type] || 0) + 1; renderCatalog(); } addItem(type); },
     grantAll(n = 5) { for (const t of Object.keys(FURNITURE)) game.owned[t] = Math.max(game.owned[t] || 0, n); renderCatalog(); saveGame(); },
     setStock(items) { game.shop = { day: game.day, items, sold: [] }; if (shopDialog.open) renderShop(); },
+    colorAt, picking: () => !!picking,
     advanceClock, buy, openShop, toggleReserve, DAY_SEC, ALLOWANCE, SLEEP_TEXT,
     select, rotateSelected, removeSelected, isBlocked, footprint, supportOf: (uid) => supportOf(findItem(uid))?.uid ?? null,
     undo, redo, savePreset, loadPreset, zoomAt, openTint, kindOf, openFit, metaOf, exportFit,

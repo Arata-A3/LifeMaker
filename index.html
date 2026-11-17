@@ -20,7 +20,7 @@
 <meta property="og:image:height" content="512">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="css/style.css?v=0.14.0">
+<link rel="stylesheet" href="css/style.css?v=0.15.0">
 </head>
 <body>
 <div id="app">
@@ -42,6 +42,7 @@
                 <button id="undo-btn" class="round-btn" aria-label="元に戻す" title="元に戻す (Ctrl+Z)" disabled>↶</button>
                 <button id="redo-btn" class="round-btn" aria-label="やり直す" title="やり直す (Ctrl+Y)" disabled>↷</button>
             </div>
+            <div id="eyedrop-bar" hidden>色を取りたい所を押してください <button id="eyedrop-cancel">やめる</button></div>
             <div id="hint">家具を選んで置こう。ドラッグで動かす、ダブルタップで向きを変える</div>
             <div id="toolbar" hidden>
                 <span id="sel-name"></span>
@@ -91,6 +92,7 @@
     <div class="tint-row"><label for="tint-s">鮮やかさ</label><output id="tint-s-val"></output><input id="tint-s" type="range" min="0" max="200" step="1"></div>
     <div class="tint-row"><label for="tint-l">明るさ</label><output id="tint-l-val"></output><input id="tint-l" type="range" min="50" max="150" step="1"></div>
     <div class="tint-actions">
+        <button id="tint-eyedrop"><span data-icon="dropper"></span>スポイト</button>
         <button id="tint-revert">開いたときに戻す</button>
         <button id="tint-reset">元の色</button>
         <button id="tint-close" class="primary">閉じる</button>
@@ -140,6 +142,6 @@
 
 <div id="toast" role="status"></div>
 
-<script type="module" src="js/app.js?v=0.14.0"></script>
+<script type="module" src="js/app.js?v=0.15.0"></script>
 </body>
 </html>

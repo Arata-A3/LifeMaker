@@ -321,15 +321,38 @@ await test('家具の色合いを変えて保存し、元の色に戻せる', as
     await L('L.redo()');
 });
 
+await test('スポイトで部屋の色を取ると、その色に近い色合いになる', async () => {
+    await L('L.select(4)');
+    await L('L.openTint(4)');
+    await evaluate(`document.getElementById('tint-eyedrop').click()`);
+    assert(await L('L.picking()') && !(await evaluate(`document.getElementById('tint-dialog').open`)), 'スポイトにならない');
+    assert(!(await evaluate(`document.getElementById('eyedrop-bar').hidden`)), '案内が出ない');
+    await shot('eyedrop');
+    // やめると、色の画面に戻る
+    await evaluate(`document.getElementById('eyedrop-cancel').click()`);
+    assert(await evaluate(`document.getElementById('tint-dialog').open`) && !(await L('L.picking()')), 'やめても戻らない');
+    await evaluate(`document.getElementById('tint-eyedrop').click()`);
+    const p = await L('L.visiblePoint(1)'); // ラグ
+    const rgb = await L(`L.colorAt(${p.x}, ${p.y})`);
+    await tapAt(p);
+    assert(await evaluate(`document.getElementById('tint-dialog').open`), '色を取ったあと色の画面に戻らない');
+    const t = (await item(4)).tint;
+    assert(t && t.all, '色合いが付かない: ' + JSON.stringify(t));
+    assert(await L('L.selected()') === 4, '押した所の家具が選ばれてしまう');
+    await evaluate(`document.getElementById('tint-reset').click()`);
+    await evaluate(`document.getElementById('tint-close').click()`);
+});
+
 await test('色合いは部分ごとにも変えられる', async () => {
     await L('L.select(2)'); // ベッド
     await L('L.openTint(2)');
+    await sleep(0); // 前のテストで閉じた画面の close が、開き直したあとに届いても困らないこと
     const parts = await evaluate(`[...document.querySelectorAll('#tint-parts .tint-part')].map(b => b.textContent)`);
     assert(parts.length >= 3 && parts[0] === 'ぜんぶ', `部分のボタン: ${parts}`);
     await evaluate(`document.querySelectorAll('#tint-parts .tint-part')[1].click()`);
     await evaluate(`(() => { const i = document.getElementById('tint-h'); i.value = 90; i.dispatchEvent(new Event('input')); i.dispatchEvent(new Event('change')); })()`);
     let t = (await item(2)).tint;
-    assert(t && t['1']?.h === 90 && !t.all && !t['2'], `1 番の部分だけ変わっていない: ${JSON.stringify(t)}`);
+    assert(t && t['1']?.h === 90 && !t.all && !t['2'], `1 番の部分だけ変わっていない: ${JSON.stringify(t)} / ${JSON.stringify(await L('L.game().items.map(i => i.uid + i.type)'))} / ${await evaluate(`document.getElementById('tint-dialog').open`)} ${parts}`);
     // 「ぜんぶ」で変えると、部分ごとの色合いは消えてそろう
     await evaluate(`document.querySelectorAll('#tint-parts .tint-part')[0].click()`);
     await evaluate(`(() => { const i = document.getElementById('tint-l'); i.value = 80; i.dispatchEvent(new Event('input')); i.dispatchEvent(new Event('change')); })()`);

@@ -200,6 +200,16 @@ dialog.sheet .wide { display: block; width: 100%; margin-top: 12px; }
 #menu-btn .ic { width: 22px; height: 22px; }
 #coins .ic, .shop-coins .ic, .shop-buy .ic { margin-right: 3px; }
 
+/* スポイト */
+#eyedrop-bar {
+    position: absolute; left: 50%; top: 60px; transform: translateX(-50%); z-index: 2;
+    display: flex; align-items: center; gap: 10px; white-space: nowrap;
+    padding: 8px 8px 8px 14px; border-radius: 999px; font-size: 13px;
+    background: var(--accent); color: var(--accent-text); box-shadow: 0 4px 16px rgb(0 0 0 / .2);
+}
+#eyedrop-bar[hidden] { display: none; }
+#eyedrop-bar button { padding: 6px 12px; border-radius: 999px; border: 0; background: var(--panel); color: var(--text); }
+
 /* お店・お金 */
 #status {
     position: absolute; right: 10px; top: 10px; display: flex; gap: 8px; align-items: center;

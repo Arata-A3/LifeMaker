@@ -22,8 +22,9 @@
 Same art style as the previous images (thin dark navy line art, flat muted colors, cute and calm).
 Draw a sprite sheet of 9 separate wall decorations for a cozy room game, arranged in a 3 x 3 grid.
 VIEW: every object is drawn straight-on from the front, like a flat scan: orthographic, perfectly upright,
-NO perspective, NO isometric angle, NO depth, NO side faces, NO thickness. Rectangular frames have perfectly
-horizontal top and bottom edges and perfectly vertical sides.
+NO perspective, NO isometric angle, NO side faces. Rectangular frames have perfectly
+horizontal top and bottom edges and perfectly vertical sides. Frames may look slightly raised with a subtle bevel
+(a lighter tone on the top and left inner edges, a darker tone on the bottom and right inner edges).
 
 OBJECTS (left to right, top to bottom):
 1. (top left) a framed landscape painting of rolling hills under the sky. proportions width:height = 4:3. Parts and colors: dark walnut brown frame; pale blue sky; sage green hills.
@@ -37,13 +38,14 @@ OBJECTS (left to right, top to bottom):
 9. (bottom right) a bunting garland: a gently sagging string with seven small triangle flags in two alternating colors. proportions width:height = 3:1. Parts and colors: dusty rose flags; sage green flags; beige string.
 
 COLOR RULES (very important, the game recolors each part separately):
-- Each object is made only of the parts listed for it. Fill each part with ONE flat color as listed.
-  The only extra allowed is ONE slightly darker shade of the same color for soft shading.
+- Each object is made only of the parts listed for it. Paint each part in its listed color.
+- Give each part a soft, cozy sense of volume using up to three tones of ITS OWN color (a lighter tone, the base tone,
+  a darker tone), and simple texture drawn with thin lines in a darker tone of the same color
+  (fabric weave or soft pile on rugs, wood grain on wooden frames, light reflections on glass).
 - Different parts must have clearly different colors (a different hue or a very different brightness).
 - Every part is surrounded by the thin dark navy outline, so parts never blend into each other.
 - Never fill a part with black or a color as dark as the outline (keep fills clearly lighter than the outline).
-- No gradients, no textures, no patterns inside a part, no noise, no tiny details, no sparkles,
-  no highlights in other colors, no text, no letters, no numbers.
+- Never blend one part's color into another part's color. No noisy tiny details, no text, no letters, no numbers.
 
 LAYOUT: each object is centered in its own cell, as large as possible but with clear magenta space around it.
 Objects never touch each other or the cell edges. No grid lines, no labels, no shadows, no wall, no floor.
@@ -68,7 +70,7 @@ Background: one solid flat magenta color (#FF00FF) everywhere.
 Same art style as the previous images (thin dark navy line art, flat muted colors, cute and calm).
 Draw a sprite sheet of 9 separate rugs and mats for a cozy room game, arranged in a 3 x 3 grid.
 VIEW: every rug is seen from directly above (top-down), perfectly flat, NO perspective, NO isometric angle,
-NO thickness, NO tassels or fringe. Rectangular rugs are perfectly axis-aligned rectangles with exactly the given proportions.
+NO tassels or fringe. Rectangular rugs are perfectly axis-aligned rectangles with exactly the given proportions.
 
 OBJECTS (left to right, top to bottom):
 1. (top left) a rectangular rug with wide stripes running along its length. proportions width:length = 3:4. Parts and colors: oatmeal beige base; terracotta stripes.
@@ -82,13 +84,14 @@ OBJECTS (left to right, top to bottom):
 9. (bottom right) a small round braided mat with two rings. square proportions. Parts and colors: mustard yellow outer ring; rust orange center.
 
 COLOR RULES (very important, the game recolors each part separately):
-- Each object is made only of the parts listed for it. Fill each part with ONE flat color as listed.
-  The only extra allowed is ONE slightly darker shade of the same color for soft shading.
+- Each object is made only of the parts listed for it. Paint each part in its listed color.
+- Give each part a soft, cozy sense of volume using up to three tones of ITS OWN color (a lighter tone, the base tone,
+  a darker tone), and simple texture drawn with thin lines in a darker tone of the same color
+  (fabric weave or soft pile on rugs, wood grain on wooden frames, light reflections on glass).
 - Different parts must have clearly different colors (a different hue or a very different brightness).
 - Every part is surrounded by the thin dark navy outline, so parts never blend into each other.
 - Never fill a part with black or a color as dark as the outline (keep fills clearly lighter than the outline).
-- No gradients, no textures, no patterns inside a part, no noise, no tiny details, no sparkles,
-  no highlights in other colors, no text, no letters, no numbers.
+- Never blend one part's color into another part's color. No noisy tiny details, no text, no letters, no numbers.
 
 LAYOUT: each object is centered in its own cell, as large as possible but with clear magenta space around it.
 Objects never touch each other or the cell edges. No grid lines, no labels, no shadows, no wall, no floor.
