@@ -9,7 +9,7 @@
    ほかの物は、底（base: 真ん中の x・いちばん下の y・幅）を求め、足元の四角の真ん中に置く。
 2. 色の部分（parts）: 線（ほぼ黒の紺）を除いた色を、似た色ごとに 2〜4 個にまとめる。
    img/<名前>_parts.png に、点ごとの部分の番号（0 は線で、色を変えない）を書く。
-   部分の名前（「茶色」など）と代表の色は img/sprites.json に書く。
+   部分の名前（PART_NAMES の「布団」「枠」など）と代表の色は img/sprites.json に書く。
 """
 import colorsys
 import json
@@ -23,7 +23,18 @@ GAME = ROOT / 'img'
 CORNER_ITEMS = {'bed', 'sofa', 'chair', 'table', 'desk', 'bookshelf', 'wardrobe', 'chest', 'nightstand', 'tvstand', 'rug', 'lowtable'}
 WALL_ITEMS = {'window', 'window2', 'picture'}
 MAX_PARTS = 4
+# 部分の名前（面積の大きい順）。部分の数が合わないとき（絵を作り直したときなど）は、色の名前にして知らせる
+PART_NAMES = {
+    'bed': ['布団', '枠', 'シーツ・枕'], 'bookshelf': ['本棚', '本 1', '本 2'], 'chair': ['木', '座面'],
+    'lamp': ['かさ', '柱'], 'lamp2': ['本体', 'かさの内側'], 'picture': ['絵', '額縁', '飾り'],
+    'plant': ['葉', '鉢', '土'], 'plant2': ['葉', '鉢', '土'], 'rug': ['柄 1', '柄 2', 'ふさ'],
+    'sofa': ['布', '脚', 'クッション'], 'vase': ['花びん', '葉', '花 1', '花 2'], 'vase2': ['花びんと花', '葉'],
+    'window': ['カーテン', '窓枠', 'ガラス'],
+}
+# 部分の数の上限（輪郭沿いの細いふちだけの部分ができる絵は、まわりの部分にまとめる）
+MAX_PARTS_BY = {'nightstand': 1, 'window2': 1, 'tvstand': 1, 'wardrobe': 1, 'plant': 3, 'plant2': 3, 'vase2': 2}
 LINE_L = 22          # これより暗い点は線（Lab の L）
+LINE_L_BY = {'nightstand': 9, 'vase2': 9, 'window2': 9}  # 塗りがとても暗い絵は、線の基準を下げる
 MERGE_DIST = 20      # 代表の色がこれより近い部分はまとめる（Lab の距離、明るさは軽く見る）
 MIN_SHARE = 0.012    # これより小さい部分は、近い部分にまとめる
 
@@ -140,12 +151,12 @@ def color_name(rgb):
     return 'ピンク' if L > 60 else '赤'
 
 
-def parts(img):
+def parts(img, line_l=LINE_L, max_parts=MAX_PARTS):
     a = np.asarray(img.convert('RGBA'))
     alpha = a[..., 3] > 128
     rgb = a[..., :3][alpha].astype(np.float64)
     lab = rgb_to_lab(rgb)
-    color = lab[:, 0] >= LINE_L
+    color = lab[:, 0] >= line_l
     x = feature(lab[color])
     sample = x[np.random.default_rng(0).choice(len(x), min(len(x), 6000), replace=False)]
     centers = kmeans(sample, 6)
@@ -163,7 +174,7 @@ def parts(img):
         if share[small] < MIN_SHARE:
             other = int(np.argmin(d[small]))
             i, j = small, other
-        elif d[i, j] >= MERGE_DIST and len(centers) <= MAX_PARTS:
+        elif d[i, j] >= MERGE_DIST and len(centers) <= max_parts:
             break
         merged = (centers[i] * share[i] + centers[j] * share[j]) / (share[i] + share[j])
         centers = np.vstack([np.delete(centers, [i, j], axis=0), merged])
@@ -192,6 +203,17 @@ def parts(img):
     return mask, info
 
 
+def name_parts(name, info):
+    names = PART_NAMES.get(name)
+    if len(info) == 1:
+        info[0]['name'] = '本体'
+    elif names and len(names) == len(info):
+        for p, n in zip(info, names):
+            p['name'] = n
+    else:
+        print(f'  ※ {name}: 部分の名前の表（PART_NAMES）と数が合わないので、色の名前にしました')
+
+
 def main():
     meta = {}
     for path in sorted(GAME.glob('*.webp')):
@@ -207,8 +229,9 @@ def main():
             entry['wall'] = wall_box(alpha)
         else:
             entry['base'] = base(alpha)
-        mask, info = parts(img)
+        mask, info = parts(img, LINE_L_BY.get(name, LINE_L), MAX_PARTS_BY.get(name, MAX_PARTS))
         Image.fromarray(mask, 'L').save(GAME / f'{name}_parts.png', optimize=True)
+        name_parts(name, info)
         entry['parts'] = info
         meta[name] = entry
         print(f"{name}: {', '.join(p['name'] for p in info)}  " + json.dumps({k: v for k, v in entry.items() if k != 'parts'}))
