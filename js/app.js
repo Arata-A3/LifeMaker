@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.8.2';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 1;
 
@@ -401,7 +401,24 @@ function sortForDraw(list) {
     }
     return out;
 }
-let drawList = []; // 最後に描いた順（当たり判定に使う）
+let drawList = []; // 最後に描いた順
+// 家具と住人を、奥から描く順に並べる
+function buildDrawList() {
+    const objs = game.items.filter(it => !FURNITURE[it.type].flat).map(it => {
+        const [w, d] = footprint(it);
+        return { item: it, x0: it.gx, x1: it.gx + w, z0: it.gz, z1: it.gz + d };
+    });
+    const r = resident;
+    let resObj = null;
+    if (r.visible) {
+        resObj = { resident: true, x0: r.x - 0.2, x1: r.x + 0.2, z0: r.z - 0.2, z1: r.z + 0.2 };
+        // 座っている・寝ている間は、その家具のすぐ後に描く
+        if (!seated()) objs.push(resObj);
+    }
+    const list = sortForDraw(objs);
+    if (resObj && !list.includes(resObj)) list.splice(list.findIndex(o => o.item?.uid === r.use.plan.uid) + 1, 0, resObj);
+    return list;
+}
 function render() {
     const g = ctx;
     g.setTransform(1, 0, 0, 1, 0, 0);
@@ -413,22 +430,7 @@ function render() {
     // 敷物 → 選んだ印 → 家具と住人（奥から）
     for (const it of game.items) if (FURNITURE[it.type].flat) FURNITURE[it.type].draw(g, it);
     drawMarker(g);
-    const objs = game.items.filter(it => !FURNITURE[it.type].flat).map(it => {
-        const [w, d] = footprint(it);
-        return { item: it, x0: it.gx, x1: it.gx + w, z0: it.gz, z1: it.gz + d };
-    });
-    const r = resident;
-    let resObj = null;
-    if (r.visible) {
-        resObj = { resident: true, x0: r.x - 0.2, x1: r.x + 0.2, z0: r.z - 0.2, z1: r.z + 0.2 };
-        // 座っている・寝ている間は、その家具のすぐ後に描く
-        if (!(r.use && r.use.k > 0.5 && r.use.plan.anchor)) objs.push(resObj);
-    }
-    drawList = sortForDraw(objs);
-    if (resObj && !drawList.includes(resObj)) {
-        const i = drawList.findIndex(o => o.item?.uid === r.use.plan.uid);
-        drawList.splice(i + 1, 0, resObj);
-    }
+    drawList = buildDrawList();
     for (const o of drawList) {
         if (o.resident) { drawResident(g); continue; }
         const def = FURNITURE[o.item.type];
@@ -527,8 +529,9 @@ function hitItem(item, x, y) {
 // 押した所にある家具（手前から。敷物は最後）
 function pickItem(clientX, clientY) {
     const [x, y] = toWorld(clientX, clientY);
-    for (let i = drawList.length - 1; i >= 0; i--) {
-        const o = drawList[i];
+    const list = buildDrawList();
+    for (let i = list.length - 1; i >= 0; i--) {
+        const o = list[i];
         if (!o.resident && hitItem(o.item, x, y)) return o.item;
     }
     for (let i = game.items.length - 1; i >= 0; i--) {
@@ -542,8 +545,8 @@ function residentHit(clientX, clientY) {
     if (!resident.visible) return false;
     const [x, y] = toWorld(clientX, clientY);
     if (!hitRect(residentRect(), x, y)) return false;
-    const ri = drawList.findIndex(o => o.resident);
-    for (let i = drawList.length - 1; i > ri; i--) if (hitItem(drawList[i].item, x, y)) return false;
+    const list = buildDrawList(), ri = list.findIndex(o => o.resident);
+    for (let i = list.length - 1; i > ri; i--) if (hitItem(list[i].item, x, y)) return false;
     return true;
 }
 function pinchInfo() {
