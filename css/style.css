@@ -199,7 +199,6 @@ dialog.sheet .wide { display: block; width: 100%; margin-top: 12px; }
 .cd-same { display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .cd-same-item { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .cd-same-item .cswatch { width: 30px; height: 30px; }
-.cd-other input[type="color"] { width: 64px; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: none; padding: 2px; }
 .cd-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .cd-actions button { flex: 1 1 auto; }
 

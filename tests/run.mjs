@@ -185,6 +185,8 @@ await test('色を変えて保存し、元の色に戻せる', async () => {
     await evaluate(`document.getElementById('color-btn').click()`);
     assert(await evaluate(`document.getElementById('color-dialog').open`), '色の画面が開かない');
     assert(await evaluate(`document.querySelector('#color-dialog .cd-recent-sec').hidden`), '最近使った色が空なのに見出しが出ている');
+    assert(!(await evaluate(`document.querySelector('#color-dialog .cd-eyedrop-sec').hidden`)), 'Chrome なのにスポイトが出ていない');
+    assert(!(await evaluate(`!!document.querySelector('#color-dialog input[type="color"]')`)), '「ほかの色」が残っている');
     await evaluate(`document.querySelectorAll('#color-dialog .cd-palette .cswatch')[15].click()`);
     const c1 = await L(`L.game().items.find(i => i.uid === ${uid}).colors.main ?? null`);
     assert(c1 === '#4a7cc4', `色が変わらない: ${c1}`);

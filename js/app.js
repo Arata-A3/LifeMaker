@@ -1,6 +1,6 @@
 import * as THREE from '../lib/three.module.min.js';
 
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.6.1';
 const SAVE_KEY = 'lifemaker_save';
 const SAVE_VERSION = 3; // 2: 家具の色を部位ごとに、床と壁を追加 / 3: テレビをテレビ台から分けた
 
@@ -1619,7 +1619,6 @@ function renderColorDialog() {
     palWrap.innerHTML = '';
     PALETTE.forEach(c => palWrap.appendChild(swatchButton(c, null, cur)));
 
-    colorDialog.querySelector('.cd-picker').value = shown;
     colorDialog.querySelector('.cd-auto').disabled = cur === null;
     updateRevertButton();
     cd.hsl = hslOf(shown);
@@ -1684,10 +1683,8 @@ function openColorDialog(target) {
     cd.snapshot = targetSnapshot(target);
     cd.openColors = currentColorList(target);
     renderColorDialog();
-    if (colorDialog.showModal) {
-        colorDialog.showModal();
-        if (target.kind === 'item') focusOn(findItem(target.uid), colorDialog);
-    } else colorDialog.querySelector('.cd-picker').click();
+    colorDialog.showModal();
+    if (target.kind === 'item') focusOn(findItem(target.uid), colorDialog);
 }
 // 下から出る画面で家具が隠れるときだけ、隠れない分だけ映す範囲を静かにずらす（カメラの向きは変えない）
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -1745,16 +1742,14 @@ colorDialog.querySelector('.cd-revert').addEventListener('click', () => {
     } else targetSet(t, snap, true);
     renderColorDialog();
 });
-const picker = colorDialog.querySelector('.cd-picker');
-picker.addEventListener('input', () => {
-    const hex = normHex(picker.value);
-    if (!hex) return;
-    targetSet(cd.target, hex, false);
-    colorDialog.querySelector('.cd-preview').style.background = hex;
-});
-picker.addEventListener('change', () => {
-    const hex = normHex(picker.value);
-    if (!hex) return;
+// スポイト: 画面の好きな所から色を取る（EyeDropper が使えるブラウザだけ）
+const eyedropBtn = colorDialog.querySelector('.cd-eyedrop');
+colorDialog.querySelector('.cd-eyedrop-sec').hidden = !('EyeDropper' in window);
+eyedropBtn.addEventListener('click', async () => {
+    let res;
+    try { res = await new window.EyeDropper().open(); } catch { return; } // Esc で取りやめ
+    const hex = normHex(res.sRGBHex);
+    if (!hex || !cd.target) return;
     targetSet(cd.target, hex, true);
     addRecentColor(hex);
     renderColorDialog();
