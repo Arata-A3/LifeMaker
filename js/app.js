@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.10.5';
+const APP_VERSION = '0.10.6';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 3; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに
 
@@ -93,10 +93,15 @@ function footprint(item) {
     const [w, d] = FURNITURE[item.type].size;
     return item.rot ? [d, w] : [w, d];
 }
-// 壁掛けの絵の高さ（m）。絵を囲む平行四辺形（img/sprites.json の wall）の高さを、壁に沿った幅に合わせて縮めた長さ
+// 壁掛けの本体の高さ（m）。本体の四角（img/sprites.json の wall.face）、なければ絵を囲む平行四辺形の高さを、壁に沿った幅に合わせて縮めた長さ
 function wallHeight(def) {
     const im = images.get(def.art), wb = spriteMeta[def.art]?.wall;
     if (!im || !wb) return 1;
+    if (wb.face) {
+        const [tl, tr, bl, br] = wb.face;
+        const k = def.size[0] * CELL_W / 2 / ((tr[0] - tl[0] + br[0] - bl[0]) / 2);
+        return ((bl[1] - tl[1]) + (br[1] - tr[1])) / 2 * k / PX_PER_M;
+    }
     return (wb.b - wb.a) * (def.size[0] * CELL_W / 2 / im.w) / PX_PER_M;
 }
 function clampItem(item) {
@@ -398,8 +403,23 @@ function solveAffine(src, dst) {
     const d = ((Y2 - Y0) * (x1 - x0) - (Y1 - Y0) * (x2 - x0)) / det;
     return [a, b, c, d, X0 - a * x0 - c * y0, Y0 - b * x0 - d * y0];
 }
+// 4 点以上の対応から、いちばん近い行列を求める（最小二乗）。AIの絵は完全な平行四辺形ではないので、4 つの角の合い方を平均する
+function fitAffine(src, dst) {
+    const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], bx = [0, 0, 0], by = [0, 0, 0];
+    src.forEach(([x, y], i) => {
+        const v = [x, y, 1];
+        for (let r = 0; r < 3; r++) { for (let c = 0; c < 3; c++) A[r][c] += v[r] * v[c]; bx[r] += v[r] * dst[i][0]; by[r] += v[r] * dst[i][1]; }
+    });
+    const solve = (b) => { // 3×3 をクラメルの公式で解く
+        const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        const D = det(A);
+        return [0, 1, 2].map(k => det(A.map((row, r) => row.map((v, c) => (c === k ? b[r] : v)))) / D);
+    };
+    const [a, c, e] = solve(bx), [b, d, f] = solve(by);
+    return [a, b, c, d, e, f];
+}
 // 家具の絵の置き方（img/sprites.json の測った値を使う）
-// - 壁掛け: 絵を囲む平行四辺形を、壁の上の四角に合わせる。絵の向き（右の壁向き・左の壁向き）と掛ける壁が違えば左右反転
+// - 壁掛け: 本体（窓枠・額縁の正面）の 4 つの角を、壁の上の四角に合わせる（飾りははみ出してよい）。絵の向き（右の壁向き・左の壁向き）と掛ける壁が違えば左右反転
 // - ラグ: 床に着く 3 つの角を、足元の四角の角に合わせる
 // - 床に着く角が分かる家具: 縦横同じ倍率で縮め、脚の先の左端・右端を足元の四角の左右の端（legInset があればその割合）に、いちばん下の脚の先を床に合わせる
 // - 丸い物・細い物（fitHeight）: その高さに縮め、底の真ん中を足元の四角の真ん中に置く
@@ -411,6 +431,18 @@ function artMatrix(item) {
     if (!im) return { m: [1, 0, 0, 1, 0, 0], im: null, src };
     const W = im.w, flip = [-1, 0, 0, 1, W, 0];
     const fp = (p) => [W - p[0], p[1]];
+    if (def.wall && meta.wall?.face) {
+        // 本体（窓枠・額縁の正面）の 4 つの角を、壁の上の四角の角に合わせる
+        let [tl, tr, bl, br] = meta.wall.face;
+        const rightWallArt = (br[1] - bl[1]) > 0; // 下の辺が右下がりなら、右の壁向きの絵
+        const mirror = rightWallArt === !!item.rot;
+        if (mirror) [tl, tr, bl, br] = [fp(tr), fp(tl), fp(br), fp(bl)];
+        const h = wallHeight(def), len = def.size[0];
+        const [s0, s1] = item.rot ? [item.gx + len, item.gx] : [item.gx, item.gx + len];
+        const Q = (along, y) => (item.rot ? P(0, along, y) : P(along, 0, y));
+        const m = fitAffine([tl, tr, bl, br], [Q(s0, lift + h), Q(s1, lift + h), Q(s0, lift), Q(s1, lift)]);
+        return { m: mirror ? mul(m, flip) : m, im, src };
+    }
     if (def.wall && meta.wall) {
         let { s, a, b } = meta.wall;
         const mirror = (s > 0) === !!item.rot; // 右の壁向きの絵を左の壁に掛ける（またはその逆）
@@ -687,11 +719,7 @@ function renderBackground() {
     g.imageSmoothingQuality = 'high';
     drawRoom(g);
     // 壁掛け → 敷物 → 選んだ印 → 床の家具の影
-    for (const it of game.items) {
-        if (kindOf(it) !== 'wall') continue;
-        if (it.uid === selectedUid) drawOutline(g, it); // 選んだ壁掛けは、絵の形どおりにふちを付ける
-        drawArt(g, it);
-    }
+    for (const it of game.items) if (kindOf(it) === 'wall') drawArt(g, it);
     for (const it of game.items) if (kindOf(it) === 'flat') drawArt(g, it);
     drawMarker(g);
     for (const it of game.items) if (kindOf(it) === 'floor') { const [w, d] = footprint(it); floorShadow(g, it.gx, it.gz, w, d); }
@@ -719,8 +747,11 @@ function drawMarker(g) {
     if (!it) return;
     const kind = kindOf(it), red = isBlocked(it);
     let pts;
-    if (kind === 'wall') return; // 壁掛けの印は、絵の形のふち（drawOutline）
-    {
+    if (kind === 'wall') {
+        // 壁掛けの本体（窓枠・額縁の正面）が合わさる、壁の上の四角
+        const p = placeOf(it), h = wallHeight(FURNITURE[it.type]);
+        pts = [P(p.gx, p.gz, p.lift), P(p.gx + p.w, p.gz + p.d, p.lift), P(p.gx + p.w, p.gz + p.d, p.lift + h), P(p.gx, p.gz, p.lift + h)];
+    } else {
         g.strokeStyle = 'rgba(60, 40, 30, 0.12)'; g.lineWidth = 1;
         for (let k = 1; k < N; k++) {
             g.beginPath(); g.moveTo(...P(k, 0)); g.lineTo(...P(k, N)); g.stroke();
@@ -736,35 +767,6 @@ function drawMarker(g) {
     g.strokeStyle = red ? '#d9534f' : '#d9774b'; g.lineWidth = 2;
     g.stroke();
     g.setLineDash([]);
-}
-
-// 絵の形のふち: 絵の形を塗りつぶした影を、少しずつずらして重ねる（このあと絵を上に描くと、ふちだけが残る）
-const outlineCache = new Map();
-function silhouette(im, color) {
-    const key = `${im.img.src}|${color}`;
-    if (outlineCache.has(key)) return outlineCache.get(key);
-    const c = document.createElement('canvas');
-    c.width = im.w; c.height = im.h;
-    const g = c.getContext('2d');
-    g.drawImage(im.img, 0, 0);
-    g.globalCompositeOperation = 'source-in';
-    g.fillStyle = color;
-    g.fillRect(0, 0, c.width, c.height);
-    outlineCache.set(key, c);
-    return c;
-}
-function drawOutline(g, it) {
-    const mx = artMatrix(it);
-    if (!mx.im) return;
-    const sil = silhouette(mx.im, isBlocked(it) ? '#d9534f' : '#e8844f');
-    const r = 2.5 / Math.sqrt(Math.abs(mx.m[0] * mx.m[3] - mx.m[1] * mx.m[2])); // 部屋の 2.5px を絵の大きさに直す
-    for (let a = 0; a < 8; a++) {
-        const dx = Math.cos(a * Math.PI / 4) * r, dy = Math.sin(a * Math.PI / 4) * r;
-        g.save();
-        g.transform(...mx.m);
-        g.drawImage(sil, dx, dy);
-        g.restore();
-    }
 }
 
 // ---------- 選択と操作 ----------

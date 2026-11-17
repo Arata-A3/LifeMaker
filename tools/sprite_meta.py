@@ -22,6 +22,14 @@ ROOT = Path(__file__).resolve().parent.parent
 GAME = ROOT / 'img'
 CORNER_ITEMS = {'bed', 'sofa', 'chair', 'table', 'desk', 'bookshelf', 'wardrobe', 'chest', 'nightstand', 'tvstand', 'rug', 'lowtable'}
 WALL_ITEMS = {'window', 'window2', 'picture'}
+# 壁掛けの本体（窓枠・額縁の正面）の 4 つの角 [左上, 右上, 左下, 右下]。img/<名前>.webp の上の位置（目で読み取った値）。
+# ゲームでは、この四角を壁の上の四角に合わせる（カーテン・レール・アーチなどの飾りは、外にはみ出してよい）。
+# 絵を作り直したら、読み取り直す
+WALL_FACES = {
+    'picture': [[7, 17], [442, 220], [5, 365], [440, 585]],
+    'window': [[30, 20], [402, 157], [30, 416], [402, 594]],   # 左端と右下はカーテンに隠れているので、見えている線を延ばした所
+    'window2': [[27, 250], [270, 135], [30, 570], [270, 427]],  # アーチの付け根を上の辺にする
+}
 MAX_PARTS = 4
 # 部分の名前（面積の大きい順）。部分の数が合わないとき（絵を作り直したときなど）は、色の名前にして知らせる
 PART_NAMES = {
@@ -226,7 +234,7 @@ def main():
         if name in CORNER_ITEMS:
             entry['corners'] = corners(alpha)
         elif name in WALL_ITEMS:
-            entry['wall'] = wall_box(alpha)
+            entry['wall'] = {'face': WALL_FACES[name]} if name in WALL_FACES else wall_box(alpha)
         else:
             entry['base'] = base(alpha)
         mask, info = parts(img, LINE_L_BY.get(name, LINE_L), MAX_PARTS_BY.get(name, MAX_PARTS))
