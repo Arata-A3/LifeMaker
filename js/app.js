@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.10.0';
+const APP_VERSION = '0.10.1';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 3; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに
 
@@ -380,16 +380,6 @@ function tintedSource(name, tint) {
 
 // ---- 絵の置き方（行列） ----
 // 行列 [a, b, c, d, e, f]: 絵の点 (u, v) → 部屋の点 (a u + c v + e, b u + d v + f)
-function solveAffine(src, dst) {
-    // 3 点の対応から行列を求める
-    const [[x0, y0], [x1, y1], [x2, y2]] = src, [[X0, Y0], [X1, Y1], [X2, Y2]] = dst;
-    const det = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-    const a = ((X1 - X0) * (y2 - y0) - (X2 - X0) * (y1 - y0)) / det;
-    const c = ((X2 - X0) * (x1 - x0) - (X1 - X0) * (x2 - x0)) / det;
-    const b = ((Y1 - Y0) * (y2 - y0) - (Y2 - Y0) * (y1 - y0)) / det;
-    const d = ((Y2 - Y0) * (x1 - x0) - (Y1 - Y0) * (x2 - x0)) / det;
-    return [a, b, c, d, X0 - a * x0 - c * y0, Y0 - b * x0 - d * y0];
-}
 function mul(m, n) { // m のあとに n ではなく、m・n（n を先に当てる）
     return [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
 }
@@ -398,7 +388,7 @@ function invert(m) {
     return [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det];
 }
 function apply(m, x, y) { return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; }
-// 家具の絵の置き方。床の角が分かっている絵は、その 3 点を床のマス目の角に合わせる（絵ごとの傾きの違いを直す）。
+// 家具の絵の置き方。床の角が分かっている絵は、脚の先の左端・右端・いちばん下を、足元の四角に合わせる（天板の出っ張りに惑わされない）。
 // それ以外は、足元の四角の横幅（fitHeight があれば高さ）に合わせて縮める。rot 1 は左右反転
 function artMatrix(item) {
     const def = FURNITURE[item.type], im = images.get(def.art);
@@ -409,10 +399,12 @@ function artMatrix(item) {
     const L = P(gx, gz + d, lift), B = P(gx + w, gz + d, lift), R = P(gx + w, gz, lift);
     const cs = spriteMeta[def.art]?.corners;
     if (cs && !def.fitHeight) {
-        // 反転した絵では、左右の角が入れ替わる
+        // 縦横同じ倍率で縮める（引き伸ばさない）。脚の先の左端・右端を足元の四角の左端・右端に、いちばん下の脚の先を床に合わせる
         const f = (p) => apply(flip, p[0], p[1]);
-        const srcPts = item.rot ? [f(cs[2]), f(cs[1]), f(cs[0])] : cs;
-        return { m: mul(solveAffine(srcPts, [L, B, R]), flip), im, src };
+        const [sl, sb, sr] = item.rot ? [f(cs[2]), f(cs[1]), f(cs[0])] : cs; // 反転した絵では、左右の角が入れ替わる
+        const k = (R[0] - L[0]) / (sr[0] - sl[0]);
+        const m = [k, 0, 0, k, L[0] - sl[0] * k, B[1] - sb[1] * k];
+        return { m: mul(m, flip), im, src };
     }
     let k, x0, y0;
     if (def.fitHeight) {
