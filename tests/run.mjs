@@ -698,6 +698,17 @@ if (SHOT_DIR) {
         { uid: 4, type: 'window', gx: 0.5, gz: 0, rot: 1, y: 0.85 }, { uid: 5, type: 'window2', gx: 4.5, gz: 0, rot: 1, y: 0.8 }, { uid: 6, type: 'picture', gx: 7.5, gz: 0, rot: 1, y: 1.1 }];
         L.save(); L.select(1); L.render(); })()`);
     await shot('all_wall');
+    // まとめて描いた敷物を並べる（img/items.json にあるとき）
+    await L(`(() => { const g = L.game(); g.items = []; let uid = 1, x = 0, z = 0, row = 0;
+        for (const [type, def] of Object.entries(L.FURNITURE)) {
+            if (!def.topdown) continue;
+            const [w, d] = def.size;
+            if (x + w > 10) { x = 0; z += row; row = 0; }
+            if (z + d > 10) break;
+            g.items.push({ uid: uid++, type, gx: x, gz: z, rot: 0 }); x += w; row = Math.max(row, d);
+        }
+        L.save(); L.select(null); L.render(); })()`);
+    await shot('sheet_rugs');
     await open('', { width: 844, height: 390, resident: true });
     await shot('phone_landscape');
 }

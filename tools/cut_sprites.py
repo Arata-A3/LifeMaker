@@ -4,9 +4,12 @@
 ゲームで使う軽い版（WebP）も img/ に書き出す（家具は長い辺 600px まで、住人は高さ 300px）。
 最後に tools/sprite_meta.py で、床の角と色の部分を求める。
 - 家具: 1 枚に 1 つ。いちばん大きなまとまりの周りで切り抜く。
+- まとめて描いた絵（art/sheets.json にある名前。wall_1.png など）: 3 × 3 に並んだ 9 個を、マスごとに切り出す。
+  名前は sheets.json の id。前の 1 枚ずつの絵と同じ id なら、こちらで置き換わる。
 - 住人（resident.*）: 4 列 × 2 行の一覧表。1 人ずつ切り出し、resident_1.png 〜 resident_8.png にする。
   足元をそろえるため、同じ大きさのキャンバスに「下端中央」をそろえて置く。
 """
+import json
 from pathlib import Path
 
 import numpy as np
@@ -22,9 +25,11 @@ GAME_RESIDENT_H = 300  # 住人の高さ（px）
 # マゼンタらしさ（R と B の小さい方 − G）。これより大きいと背景、小さいと絵
 KEY_HI, KEY_LO = 150, 70
 RESIDENT_GRID = (4, 2)
+SHEET_GRID = (3, 3)
+SHEETS = ROOT / 'art' / 'sheets.json'
 
 
-def key_out(img: Image.Image) -> Image.Image:
+def key_out(img: Image.Image, min_share=0.02) -> Image.Image:
     a = np.asarray(img.convert('RGB')).astype(np.float32)
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
     m = np.minimum(r, b) - g
@@ -34,7 +39,7 @@ def key_out(img: Image.Image) -> Image.Image:
     lab, n = ndimage.label(solid)
     if n:
         sizes = ndimage.sum(solid, lab, range(1, n + 1))
-        keep = np.isin(lab, np.nonzero(sizes >= max(200, sizes.max() * 0.02))[0] + 1)
+        keep = np.isin(lab, np.nonzero(sizes >= max(200, sizes.max() * min_share))[0] + 1)
         keep = ndimage.binary_dilation(keep, iterations=3)
         alpha = alpha * keep
     # ふちに残ったマゼンタの色かぶりを取る
@@ -86,20 +91,58 @@ def cut_resident(path: Path):
     print(f'resident: {len(cells)} pieces ({W}x{H})')
 
 
+def save_sprite(img: Image.Image, name: str):
+    img.save(OUT / f'{name}.png')
+    k = min(1, GAME_MAX / max(img.size))
+    img.resize((round(img.width * k), round(img.height * k)), Image.LANCZOS).save(GAME / f'{name}.webp', quality=90)
+    print(f'{name}: {img.width}x{img.height}')
+
+
+def cut_sheet(path: Path, sheet: dict):
+    """3 × 3 に並んだ絵を、マスごとに切り出す。絵のまとまり（少し離れた部分もつなげる）の真ん中がどのマスにあるかで分ける
+    （ガーランドの旗のように、離れた部分でできた物もあるため）"""
+    img = key_out(Image.open(path), min_share=0.002)
+    arr = np.asarray(img)
+    alpha = arr[..., 3] > 128
+    lab, n = ndimage.label(ndimage.binary_dilation(alpha, iterations=6))
+    cols, rows = SHEET_GRID
+    cw, ch = img.width / cols, img.height / rows
+    cells = {}
+    for k, sl in enumerate(ndimage.find_objects(lab), 1):
+        if sl is None:
+            continue
+        ys, xs = np.nonzero((lab[sl] == k) & alpha[sl])
+        if len(xs) < 150:  # ゴミ
+            continue
+        cy, cx = ys.mean() + sl[0].start, xs.mean() + sl[1].start
+        i = min(rows - 1, int(cy / ch)) * cols + min(cols - 1, int(cx / cw))
+        cells.setdefault(i, []).append(k)
+    for i, it in enumerate(sheet['items']):
+        if i not in cells:
+            print(f'  ※ {path.stem} の {i + 1} 番（{it["id"]}）が見つかりません')
+            continue
+        part = arr.copy()
+        part[..., 3] = np.where(np.isin(lab, cells[i]), part[..., 3], 0)
+        save_sprite(crop(Image.fromarray(part, 'RGBA')), it['id'])
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     GAME.mkdir(parents=True, exist_ok=True)
+    sheets = json.loads(SHEETS.read_text(encoding='utf-8')) if SHEETS.exists() else {}
+    later = []
     for path in sorted(SRC.iterdir()):
         if path.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
             continue
         if path.stem == 'resident':
             cut_resident(path)
             continue
-        img = crop(key_out(Image.open(path)))
-        img.save(OUT / f'{path.stem}.png')
-        k = min(1, GAME_MAX / max(img.size))
-        img.resize((round(img.width * k), round(img.height * k)), Image.LANCZOS).save(GAME / f'{path.stem}.webp', quality=90)
-        print(f'{path.stem}: {img.width}x{img.height}')
+        if path.stem in sheets:
+            later.append(path)  # 1 枚ずつの絵より後に切り出す（同じ名前なら、まとめて描いた方にする）
+            continue
+        save_sprite(crop(key_out(Image.open(path))), path.stem)
+    for path in later:
+        cut_sheet(path, sheets[path.stem])
 
 
 if __name__ == '__main__':

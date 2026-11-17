@@ -22,6 +22,7 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 GAME = ROOT / 'img'
+SHEETS = ROOT / 'art' / 'sheets.json'
 CORNER_ITEMS = {'bed', 'sofa', 'chair', 'table', 'desk', 'bookshelf', 'wardrobe', 'chest', 'nightstand', 'tvstand', 'rug', 'lowtable'}
 WALL_ITEMS = {'window', 'window2', 'picture'}
 MAX_PARTS = 4
@@ -216,8 +217,42 @@ def name_parts(name, info):
         print(f'  ※ {name}: 部分の名前の表（PART_NAMES）と数が合わないので、色の名前にしました')
 
 
+def load_sheets():
+    """まとめて描いた絵（art/sheets.json）のうち、art/source に絵があるもののアイテム。id → (種類, アイテムの定義)"""
+    if not SHEETS.exists():
+        return {}
+    out = {}
+    for name, sheet in json.loads(SHEETS.read_text(encoding='utf-8')).items():
+        if not any((ROOT / 'art' / 'source' / f'{name}{ext}').exists() for ext in ('.png', '.jpg', '.jpeg', '.webp')):
+            continue  # まだ描いていない
+        for it in sheet['items']:
+            out[it['id']] = (sheet['kind'], it)
+    return out
+
+
+def write_items(sheet_items):
+    """ゲームが読むアイテムの定義（img/items.json）。絵ができているものだけ"""
+    items = {}
+    for name, (kind, it) in sheet_items.items():
+        if not (GAME / f'{name}.webp').exists():
+            continue
+        d = {'kind': kind, 'name': it['name'], 'price': it['price']}
+        if kind == 'wall':
+            d.update(size=it['size'], y=it['y'])
+        else:
+            d['size'] = it['size']
+        items[name] = d
+    (GAME / 'items.json').write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding='utf-8')
+    print(f'img/items.json: {len(items)} items')
+
+
 def main():
     meta = {}
+    sheet_items = load_sheets()
+    for name, (kind, it) in sheet_items.items():
+        PART_NAMES[name] = [n for n, _ in it['parts']]
+        MAX_PARTS_BY[name] = len(it['parts'])
+        LINE_L_BY.pop(name, None)
     fit_path = GAME / 'fit.json'
     fitted = json.loads(fit_path.read_text(encoding='utf-8')) if fit_path.exists() else {}
     for path in sorted(GAME.glob('*.webp')):
@@ -227,9 +262,12 @@ def main():
         img = Image.open(path).convert('RGBA')
         entry = {}
         alpha = np.asarray(img)[..., 3] > 128
-        if name in CORNER_ITEMS:
+        kind = sheet_items.get(name, (None,))[0]
+        if kind == 'rug':
+            entry['topdown'] = True  # 真上から見た敷物（ゲームで床の四角に合わせて変形する）
+        elif name in CORNER_ITEMS and kind is None:
             entry['corners'] = corners(alpha)
-        elif name in WALL_ITEMS:
+        elif name in WALL_ITEMS or kind == 'wall':
             entry['wall'] = wall_box(alpha)
         else:
             entry['base'] = base(alpha)
@@ -242,6 +280,7 @@ def main():
         if name in fitted:
             print(f'  ※ {name}: 手で直した合わせ方（img/fit.json）があります。絵を作り直したなら、ゲームの「合わせる」で直し直してください')
     (GAME / 'sprites.json').write_text(json.dumps(meta, ensure_ascii=False, indent=1), encoding='utf-8')
+    write_items(sheet_items)
 
 
 if __name__ == '__main__':

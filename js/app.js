@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.13.0';
+const APP_VERSION = '0.14.0';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 4; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに / 4: お金・持ち物・ゲームの中の日・お店
 
@@ -59,6 +59,22 @@ const PRICES = {
     window: 900, window2: 1000, picture: 600,
 };
 for (const [type, def] of Object.entries(FURNITURE)) def.price = PRICES[type] || 500;
+// まとめて描いた絵のアイテム（img/items.json。tools/sprite_meta.py が art/sheets.json から作る）を足す。
+// 同じ id の家具は、絵・大きさ・名前を置き換える（住人の使い方とセリフは残す）
+async function loadSheetItems() {
+    let items = {};
+    try { items = await (await fetch(`img/items.json?v=${APP_VERSION}`)).json(); } catch (e) { console.error(e); }
+    for (const [id, it] of Object.entries(items || {})) {
+        if (!it || typeof it.name !== 'string') continue;
+        const def = { ...(FURNITURE[id] || { use: 'look', lines: ['すてき', 'いいながめ'] }), name: it.name, art: id, price: Math.max(1, Math.round(num(it.price))) || 500 };
+        if (it.kind === 'wall') Object.assign(def, { wall: true, size: [Math.max(1, Math.round(num(it.size))), 0], y: num(it.y) || 1 });
+        else if (it.kind === 'rug' && Array.isArray(it.size)) {
+            Object.assign(def, { flat: true, topdown: true, size: it.size.map(v => Math.max(1, Math.round(num(v)))) });
+            delete def.use; delete def.lines;
+        } else continue;
+        FURNITURE[id] = def;
+    }
+}
 function kindOf(item) {
     const d = FURNITURE[item.type];
     return d.wall ? 'wall' : d.small ? 'small' : d.flat ? 'flat' : 'floor';
@@ -131,9 +147,13 @@ function wallHeight(def) {
     if (!im || !wb) return 1;
     if (wb.face) {
         const [tl, tr, bl, br] = wb.face;
+        if (Math.abs((br[1] - bl[1]) / ((br[0] - bl[0]) || 1)) < 0.15) { // 正面の絵: 縦横の比のまま（1 マス 0.5m）
+            return ((bl[1] - tl[1]) + (br[1] - tr[1])) / ((tr[0] - tl[0]) + (br[0] - bl[0])) * def.size[0] * 0.5;
+        }
         const k = def.size[0] * CELL_W / 2 / ((tr[0] - tl[0] + br[0] - bl[0]) / 2);
         return ((bl[1] - tl[1]) + (br[1] - tr[1])) / 2 * k / PX_PER_M;
     }
+    if (Math.abs(wb.s) < 0.15) return (wb.b - wb.a) / im.w * def.size[0] * 0.5; // 正面の絵: 縦横の比のまま
     return (wb.b - wb.a) * (def.size[0] * CELL_W / 2 / im.w) / PX_PER_M;
 }
 function clampItem(item) {
@@ -644,6 +664,13 @@ function artMatrix(item) {
         const Q = (along, y) => (item.rot ? P(0, along, y) : P(along, 0, y));
         const m = solveAffine([[0, a], [0, b], [W, b + s * W]], [Q(s0, lift + h), Q(s0, lift), Q(s1, lift)]);
         return { m: mirror ? mul(m, flip) : m, im, src };
+    }
+    if (def.topdown) {
+        // 真上から見た敷物: 絵の四角を床の四角に合わせる（絵の横が gx の向き。rot 1 は 90 度回す）
+        const S = [[0, 0], [W, 0], [0, im.h]];
+        const m = item.rot ? solveAffine(S, [P(gx + w, gz, lift), P(gx + w, gz + d, lift), P(gx, gz, lift)])
+            : solveAffine(S, [P(gx, gz, lift), P(gx + w, gz, lift), P(gx, gz + d, lift)]);
+        return { m, im, src };
     }
     const L = P(gx, gz + d, lift), B = P(gx + w, gz + d, lift), R = P(gx + w, gz, lift);
     const cs = meta.corners;
@@ -1923,6 +1950,7 @@ function openFit(uid) {
     if (!it) return;
     const def = FURNITURE[it.type];
     if (!images.get(def.art)) return;
+    if (def.topdown) { toast('真上から描いた敷物は、床の四角にそのまま合わせています'); return; }
     Object.assign(fitState, { art: def.art, def, kind: fitKind(def), sel: 0, zoom: false, drag: null, before: JSON.stringify(fitLocal[def.art] ?? null) });
     fitState.pts = fitPoints(def, fitState.kind);
     document.getElementById('fit-name').textContent = def.name;
@@ -2285,6 +2313,7 @@ function toast(msg) {
 }
 
 // ---------- 起動 ----------
+await loadSheetItems();
 loadGame();
 applyAppearance();
 renderCatalog();
