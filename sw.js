@@ -9,8 +9,7 @@ const CORE = [
     'icon.svg',
     'icon-192.png',
     'icon-512.png',
-    'img/bed.webp',
-    'img/sofa.webp',
+    ...['bed', 'sofa', 'chair', 'table', 'lowtable', 'desk', 'bookshelf', 'wardrobe', 'chest', 'nightstand', 'tvstand', 'lamp', 'lamp2', 'plant', 'plant2'].map(n => `img/${n}.webp`),
     ...[1, 2, 3, 4, 5, 6, 7, 8].map(n => `img/resident_${n}.webp`),
 ];
 

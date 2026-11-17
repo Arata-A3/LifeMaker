@@ -385,6 +385,17 @@ await test('住人がひとりで動き続けても止まらない', async () =>
 if (SHOT_DIR) {
     await open('', { width: 1366, height: 768, mobile: false, resident: true });
     await shot('pc');
+    // 全部の家具を並べて、大きさがそろっているか見る
+    await L(`(() => { const g = L.game(); g.items = []; let uid = 1, x = 0, z = 0, row = 0;
+        for (const type of Object.keys(L.FURNITURE)) {
+            if (type === 'rug') continue;
+            const [w, d] = L.FURNITURE[type].size;
+            if (x + w > 10) { x = 0; z += row; row = 0; }
+            g.items.push({ uid: uid++, type, gx: x, gz: z, rot: 0 }); x += w; row = Math.max(row, d);
+        }
+        L.save(); L.render(); })()`);
+    await R('R.freeze(true, true)');
+    await shot('all_items');
     await open('', { width: 844, height: 390, resident: true });
     await shot('phone_landscape');
 }

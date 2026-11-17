@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.8.1';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 1;
 
@@ -20,13 +20,25 @@ function unP(x, yy, y = 0) {
 
 // ---------- 家具の定義 ----------
 // size: [gx 方向, gz 方向]（マス）。絵は「正面が左下（+gz）」で描く。rot 1 は左右反転（正面が右下、大きさも入れ替わる）
-// art: img/ の絵。draw: 絵がまだない家具をコードで描く（仮の絵）
-// use: 住人の使い方（sit 座る / lie 寝る / look 眺める）
+// art: img/ の絵。絵は足元の四角の横幅に合わせて縮める。fitHeight（m）があれば、その高さに合わせる
+// draw: 絵がまだない家具をコードで描く（仮の絵）
+// use: 住人の使い方（sit 座る / lie 寝る / look 眺める）。seats: 座る席の位置（横幅の割合）
 const FURNITURE = {
-    bed: { name: 'ベッド', icon: '🛏', size: [2, 4], art: 'bed', use: 'lie', lines: ['おやすみ…', 'すやすや'] },
-    sofa: { name: 'ソファ', icon: '🛋', size: [4, 2], art: 'sofa', use: 'sit', lines: ['ふう、ひと休み', 'このソファ、ふかふか', 'のんびりしよう'] },
-    lowtable: { name: 'ローテーブル', icon: '☕', size: [2, 2], draw: drawLowtable, height: 0.45, use: 'look', lines: ['お茶にしよう', 'いい香り'] },
-    plant: { name: '観葉植物', icon: '🪴', size: [1, 1], draw: drawPlant, height: 1.6, use: 'look', lines: ['水やりしなきゃ', '葉っぱがきれい'] },
+    bed: { name: 'ベッド', size: [2, 4], art: 'bed', use: 'lie', lines: ['おやすみ…', 'すやすや'] },
+    sofa: { name: 'ソファ', size: [4, 2], art: 'sofa', use: 'sit', seats: [0.3, 0.7], lines: ['ふう、ひと休み', 'このソファ、ふかふか', 'のんびりしよう'] },
+    chair: { name: 'いす', size: [1, 1], art: 'chair', use: 'sit', seats: [0.5], lines: ['ちょっと座ろう', 'いすがちょうどいい'] },
+    table: { name: 'テーブル', size: [3, 2], art: 'table', use: 'look', lines: ['ごはん、何にしよう', 'お茶にしよう'] },
+    lowtable: { name: 'ローテーブル', size: [2, 2], art: 'lowtable', fitHeight: 0.45, use: 'look', lines: ['いい香り', 'ひと息つこう'] },
+    desk: { name: '机', size: [2, 1], art: 'desk', use: 'look', lines: ['ちょっと調べもの', 'がんばるぞ'] },
+    bookshelf: { name: '本棚', size: [2, 1], art: 'bookshelf', use: 'look', lines: ['何を読もうかな', 'この本、おもしろそう'] },
+    wardrobe: { name: 'クローゼット', size: [2, 1], art: 'wardrobe', use: 'look', lines: ['今日は何を着よう', 'おしゃれしたいな'] },
+    chest: { name: 'チェスト', size: [2, 1], art: 'chest', use: 'look', lines: ['何をしまったっけ'] },
+    nightstand: { name: 'サイドテーブル', size: [1, 1], art: 'nightstand' },
+    tvstand: { name: 'テレビ台', size: [3, 1], art: 'tvstand', use: 'look', lines: ['テレビ、置きたいな'] },
+    lamp: { name: 'スタンドライト', size: [1, 1], art: 'lamp' },
+    lamp2: { name: 'スタンドライト（フリンジ）', size: [1, 1], art: 'lamp2' },
+    plant: { name: '観葉植物', size: [1, 1], art: 'plant', use: 'look', lines: ['水やりしなきゃ', '葉っぱがきれい'] },
+    plant2: { name: '観葉植物（小）', size: [1, 1], art: 'plant2', use: 'look', lines: ['すくすく育ってる', '葉っぱがきれい'] },
     rug: { name: 'ラグ', icon: '🟥', size: [4, 3], draw: drawRug, flat: true },
 };
 
@@ -36,7 +48,6 @@ function mix(a, b, t) {
     const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
     return '#' + [16, 8, 0].map(s => Math.round(((pa >> s) & 255) + (((pb >> s) & 255) - ((pa >> s) & 255)) * t).toString(16).padStart(2, '0')).join('');
 }
-const light = (c, t = 0.15) => mix(c, '#fffaf0', t);
 
 // ---------- 状態とセーブ ----------
 function makeDefaultGame() {
@@ -177,6 +188,11 @@ function artRect(item) {
     const [w, d] = footprint(item);
     const left = P(item.gx, item.gz + d)[0], right = P(item.gx + w, item.gz)[0], bottom = P(item.gx + w, item.gz + d)[1];
     if (!im) return { x: left, y: bottom - 100, w: right - left, h: 100, flip: !!item.rot, im: null };
+    if (def.fitHeight) {
+        // 高さに合わせて縮め、足元の四角の真ん中にそろえる
+        const k = (def.fitHeight * PX_PER_M + (w + d) * CELL_H / 2) / im.h, cx = (left + right) / 2;
+        return { x: cx - im.w * k / 2, y: bottom - im.h * k, w: im.w * k, h: im.h * k, flip: !!item.rot, im };
+    }
     const k = (right - left) / im.w;
     return { x: left, y: bottom - im.h * k, w: right - left, h: im.h * k, flip: !!item.rot, im };
 }
@@ -225,7 +241,7 @@ function floorShadow(g, gx, gz, w, d, alpha = 0.22) {
     softShape(g, [P(gx - 0.05, gz - 0.05), P(gx + w + 0.3, gz - 0.05), P(gx + w + 0.3, gz + d + 0.2), P(gx - 0.05, gz + d + 0.2)], `rgba(40, 28, 50, ${alpha})`, 10);
 }
 
-// 仮の絵: ラグ・ローテーブル・観葉植物
+// 仮の絵: ラグ
 function drawRug(g, item) {
     const [w, d] = footprint(item), { gx, gz } = item;
     quad(g, P(gx, gz), P(gx + w, gz), P(gx + w, gz + d), P(gx, gz + d), '#7d4a52');
@@ -235,38 +251,6 @@ function drawRug(g, item) {
     }
     g.strokeStyle = '#cfb9a0'; g.lineWidth = 1.2;
     for (let t = 0.1; t < w; t += 0.18) { g.beginPath(); g.moveTo(...P(gx + t, gz + d)); g.lineTo(...P(gx + t, gz + d + 0.14)); g.stroke(); }
-}
-function drawLowtable(g, item) {
-    const [w, d] = footprint(item);
-    floorShadow(g, item.gx + 0.3, item.gz + 0.3, w - 0.6, d - 0.6, 0.18);
-    const [x, y0] = P(item.gx + w / 2, item.gz + d / 2), y1 = y0 - 0.34 * PX_PER_M;
-    ellipseAt(g, x, y0 - 1, 18, 9, '#3a2a24');
-    path(g, [[x - 4, y1], [x - 4, y0], [x + 4, y0], [x + 4, y1]]); fillLine(g, '#3a2a24');
-    g.beginPath(); g.moveTo(x - 44, y1); g.lineTo(x - 44, y1 + 4); g.ellipse(x, y1 + 4, 44, 22, 0, Math.PI, 0, true); g.lineTo(x + 44, y1); g.closePath(); fillLine(g, '#4a382f');
-    ellipseAt(g, x, y1, 44, 22, '#6a5040');
-    // 本とカップ
-    const bx = x - 14, by = y1 - 2;
-    path(g, [[bx - 14, by], [bx, by + 7], [bx + 14, by], [bx, by - 7]]); fillLine(g, '#8e4a52', 1);
-    path(g, [[bx - 14, by], [bx - 14, by + 3], [bx, by + 10], [bx, by + 7]]); fillLine(g, '#e8e0d0', 0.8);
-    g.beginPath(); g.moveTo(x + 14, y1 - 12); g.lineTo(x + 14, y1 - 2); g.ellipse(x + 20, y1 - 2, 6, 3, 0, Math.PI, 0, true); g.lineTo(x + 26, y1 - 12); g.closePath(); fillLine(g, '#e9e3da', 1);
-    ellipseAt(g, x + 20, y1 - 12, 6, 3, '#5a3a2a', 0.8);
-}
-const PLANT_LEAVES = [[-34, -58, -0.75, 9, 30], [30, -62, 0.7, 9, 30], [-8, -92, -0.1, 8, 34], [-44, -28, -1.2, 8, 26], [40, -30, 1.15, 8, 26], [12, -74, 0.3, 8, 32], [-22, -78, -0.4, 8, 32], [22, -44, 0.9, 7, 24], [-18, -46, -0.9, 7, 24]];
-function drawPlant(g, item) {
-    floorShadow(g, item.gx + 0.15, item.gz + 0.15, 0.7, 0.7, 0.25);
-    const [x, y0] = P(item.gx + 0.5, item.gz + 0.5), y1 = y0 - 0.46 * PX_PER_M;
-    g.beginPath(); g.moveTo(x - 15, y1); g.lineTo(x - 12, y0); g.ellipse(x, y0, 12, 6, 0, Math.PI, 0, true); g.lineTo(x + 15, y1); g.closePath(); fillLine(g, '#a8644a');
-    ellipseAt(g, x, y1, 15, 7.5, '#8a4e3a');
-    for (const [dx, dy, r, rx, ry] of PLANT_LEAVES) {
-        const cx = x + dx * 0.9, cy = y1 + dy * 0.85 + 6;
-        const c = Math.abs(r) > 0.8 ? '#41624a' : '#557a5a';
-        const tip = [cx + Math.sin(r) * ry, cy - Math.cos(r) * ry], base = [cx - Math.sin(r) * ry, cy + Math.cos(r) * ry];
-        const nx = Math.cos(r) * rx, ny = Math.sin(r) * rx;
-        g.strokeStyle = '#3c5a40'; g.lineWidth = 1;
-        g.beginPath(); g.moveTo(x, y1 - 2); g.quadraticCurveTo((x + base[0]) / 2, y1 - 4, ...base); g.stroke();
-        g.beginPath(); g.moveTo(...base); g.quadraticCurveTo(cx + nx, cy + ny, ...tip); g.quadraticCurveTo(cx - nx, cy - ny, ...base); g.closePath(); fillLine(g, c, 1);
-        g.strokeStyle = light(c, 0.25); g.lineWidth = 0.7; g.beginPath(); g.moveTo(...base); g.lineTo(...tip); g.stroke();
-    }
 }
 // 仮の絵の当たり判定: 足元の四角を、高さの分だけ上に伸ばした形
 function drawHit(item, x, y) {
@@ -831,7 +815,7 @@ function plansFor(item) {
     }
     if (def.use === 'sit') {
         // 横に並んだ席。絵の足元は座面の手前
-        return [len * 0.3, len * 0.7].map(a => ({ ...base, to: L(a, dep + G), anchor: { ...L(a, dep - 0.55), lift: 0 }, face: front }));
+        return def.seats.map(f => len * f).map(a => ({ ...base, to: L(a, dep + G), anchor: { ...L(a, dep - 0.55), lift: 0 }, face: front }));
     }
     // 寝る: ベッドの横から入る。寝た絵は頭が左上なので、rot 0（頭が右上）では反転する
     const anchor = { ...L(len / 2 - 0.05, 1.8), lift: 0.32 };
