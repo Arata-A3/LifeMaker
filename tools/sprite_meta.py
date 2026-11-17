@@ -26,6 +26,7 @@ SHEETS = ROOT / 'art' / 'sheets.json'
 CORNER_ITEMS = {'bed', 'sofa', 'chair', 'table', 'desk', 'bookshelf', 'wardrobe', 'chest', 'nightstand', 'tvstand', 'rug', 'lowtable'}
 WALL_ITEMS = {'window', 'window2', 'picture'}
 MAX_PARTS = 4
+PART_COLORS = {}  # まとめて描いた絵の部位の色（名前を、いちばん近い色の部位に付ける）
 # 部分の名前（面積の大きい順）。部分の数が合わないとき（絵を作り直したときなど）は、色の名前にして知らせる
 PART_NAMES = {
     'bed': ['布団', '枠', 'シーツ・枕'], 'bookshelf': ['本棚', '本 1', '本 2'], 'chair': ['木', '座面'],
@@ -206,6 +207,29 @@ def parts(img, line_l=LINE_L, max_parts=MAX_PARTS):
     return mask, info
 
 
+def parts_seeded(img, line_l, seeds, names):
+    """部位の色が分かっている絵（まとめて描いた絵）。表の色を最初の目安にして色を振り分け（k-means）、表どおりの数・名前の部位にする"""
+    a = np.asarray(img.convert('RGBA'))
+    alpha = a[..., 3] > 128
+    rgb = a[..., :3][alpha].astype(np.float64)
+    lab = rgb_to_lab(rgb)
+    color = lab[:, 0] >= line_l
+    x = feature(lab[color])
+    c = feature(rgb_to_lab(np.array([[int(h[k:k + 2], 16) for k in (1, 3, 5)] for h in seeds], dtype=np.float64)))
+    for _ in range(25):
+        ids = np.argmin(((x[:, None, :] - c[None]) ** 2).sum(-1), axis=1)
+        c = np.array([x[ids == i].mean(0) if np.any(ids == i) else c[i] for i in range(len(c))])
+    flat = np.zeros(len(rgb), dtype=np.uint8)
+    flat[color] = ids + 1
+    mask = np.zeros(alpha.shape, dtype=np.uint8)
+    mask[alpha] = flat
+    info = []
+    for n, name in enumerate(names, 1):
+        avg = rgb[flat == n].mean(0) if np.any(flat == n) else np.array([int(seeds[n - 1][k:k + 2], 16) for k in (1, 3, 5)])
+        info.append({'name': name, 'color': '#%02x%02x%02x' % tuple(int(v) for v in avg)})
+    return mask, info
+
+
 def name_parts(name, info):
     names = PART_NAMES.get(name)
     if len(info) == 1:
@@ -250,7 +274,8 @@ def main():
     meta = {}
     sheet_items = load_sheets()
     for name, (kind, it) in sheet_items.items():
-        PART_NAMES[name] = [n for n, _ in it['parts']]
+        PART_NAMES[name] = [p[0] for p in it['parts']]
+        PART_COLORS[name] = [p[2] for p in it['parts']]
         MAX_PARTS_BY[name] = len(it['parts'])
         LINE_L_BY.pop(name, None)
     fit_path = GAME / 'fit.json'
@@ -271,9 +296,12 @@ def main():
             entry['wall'] = wall_box(alpha)
         else:
             entry['base'] = base(alpha)
-        mask, info = parts(img, LINE_L_BY.get(name, LINE_L), MAX_PARTS_BY.get(name, MAX_PARTS))
+        if name in PART_COLORS:
+            mask, info = parts_seeded(img, LINE_L_BY.get(name, LINE_L), PART_COLORS[name], PART_NAMES[name])
+        else:
+            mask, info = parts(img, LINE_L_BY.get(name, LINE_L), MAX_PARTS_BY.get(name, MAX_PARTS))
+            name_parts(name, info)
         Image.fromarray(mask, 'L').save(GAME / f'{name}_parts.png', optimize=True)
-        name_parts(name, info)
         entry['parts'] = info
         meta[name] = entry
         print(f"{name}: {', '.join(p['name'] for p in info)}  " + json.dumps({k: v for k, v in entry.items() if k != 'parts'}))

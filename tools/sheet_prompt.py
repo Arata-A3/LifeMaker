@@ -3,7 +3,7 @@
 使い方: python tools/sheet_prompt.py
 
 色を部位ごとにきれいに変えられるように、部位ごとに 1 色のべた塗り（同じ色の少し暗い影だけ可）で描かせる。
-部位の名前と色は sheets.json の parts（[名前, 色の説明]）。ゲームの「色」の部位の名前にもなる。
+部位の名前と色は sheets.json の parts（[名前, 色の説明, 色の値]）。色の値は、切り出した部位に名前を付けるときに使う（いちばん近い色の部位の名前にする）。ゲームの「色」の部位の名前にもなる。
 """
 import json
 from pathlib import Path
@@ -49,7 +49,7 @@ def prompt(name, sheet):
     kind = sheet['kind']
     lines = [HEAD[kind], '', 'OBJECTS (left to right, top to bottom):']
     for i, it in enumerate(sheet['items']):
-        parts = '; '.join(f'{c}' for _, c in it['parts'])
+        parts = '; '.join(p[1] for p in it['parts'])
         lines.append(f'{i + 1}. ({POS[i]}) {it["draw"]}. {size_text(kind, it)}. Parts and colors: {parts}.')
     lines += ['', COLOR_RULES, '', TAIL]
     return '\n'.join(lines)
@@ -65,7 +65,7 @@ def main():
         md += [f'## {name}（{sheet.get("note", "")}） → `art/source/{name}.png`', '']
         md += ['| 場所 | アイテム | 部位 |', '| --- | --- | --- |']
         for i, it in enumerate(sheet['items']):
-            md.append(f'| {i // 3 + 1} 段目 {i % 3 + 1} 番 | {it["name"]}（`{it["id"]}`） | {"・".join(n for n, _ in it["parts"])} |')
+            md.append(f'| {i // 3 + 1} 段目 {i % 3 + 1} 番 | {it["name"]}（`{it["id"]}`） | {"・".join(p[0] for p in it["parts"])} |')
         md += ['', '```', prompt(name, sheet), '```', '']
     OUT.write_text('\n'.join(md), encoding='utf-8')
     print(f'art/sheet_prompts.md: {len(sheets)} sheets')

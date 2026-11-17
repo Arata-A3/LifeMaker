@@ -107,6 +107,27 @@
    }
   ]
  },
+ "clock": {
+  "wall": {
+   "s": -0.0038,
+   "a": 5.4,
+   "b": 218.5
+  },
+  "parts": [
+   {
+    "name": "文字盤",
+    "color": "#edeae0"
+   },
+   {
+    "name": "枠",
+    "color": "#527460"
+   },
+   {
+    "name": "針",
+    "color": "#654d4d"
+   }
+  ]
+ },
  "desk": {
   "corners": [
    [
@@ -126,6 +147,27 @@
    {
     "name": "本体",
     "color": "#7d564c"
+   }
+  ]
+ },
+ "garland": {
+  "wall": {
+   "s": -0.0019,
+   "a": 5.0,
+   "b": 120.4
+  },
+  "parts": [
+   {
+    "name": "旗 1",
+    "color": "#ab7a86"
+   },
+   {
+    "name": "旗 2",
+    "color": "#8ca18a"
+   },
+   {
+    "name": "ひも",
+    "color": "#dbc2b1"
    }
   ]
  },
@@ -185,6 +227,49 @@
    }
   ]
  },
+ "mat_round": {
+  "topdown": true,
+  "parts": [
+   {
+    "name": "外側",
+    "color": "#cea248"
+   },
+   {
+    "name": "内側",
+    "color": "#af573e"
+   }
+  ]
+ },
+ "mat_small": {
+  "topdown": true,
+  "parts": [
+   {
+    "name": "地",
+    "color": "#9f7555"
+   },
+   {
+    "name": "ふち",
+    "color": "#6d514d"
+   }
+  ]
+ },
+ "mirror": {
+  "wall": {
+   "s": -0.0071,
+   "a": 4.6,
+   "b": 259.7
+  },
+  "parts": [
+   {
+    "name": "鏡",
+    "color": "#bfd1dd"
+   },
+   {
+    "name": "枠",
+    "color": "#c49f5b"
+   }
+  ]
+ },
  "nightstand": {
   "corners": [
    [
@@ -209,22 +294,22 @@
  },
  "picture": {
   "wall": {
-   "s": 0.5136,
-   "a": -30.7,
-   "b": 369.4
+   "s": 0.0,
+   "a": 5.0,
+   "b": 215.0
   },
   "parts": [
    {
-    "name": "絵",
-    "color": "#93ab9d"
-   },
-   {
     "name": "額縁",
-    "color": "#5d4443"
+    "color": "#634a42"
    },
    {
-    "name": "飾り",
-    "color": "#a8916c"
+    "name": "空",
+    "color": "#c9e1e2"
+   },
+   {
+    "name": "丘",
+    "color": "#89a588"
    }
   ]
  },
@@ -270,6 +355,69 @@
    }
   ]
  },
+ "poster_cat": {
+  "wall": {
+   "s": 0.0,
+   "a": 5.0,
+   "b": 265.0
+  },
+  "parts": [
+   {
+    "name": "背景",
+    "color": "#c99395"
+   },
+   {
+    "name": "ねこ",
+    "color": "#a08984"
+   },
+   {
+    "name": "枠",
+    "color": "#dfb591"
+   }
+  ]
+ },
+ "poster_moon": {
+  "wall": {
+   "s": 0.0,
+   "a": 5.0,
+   "b": 265.0
+  },
+  "parts": [
+   {
+    "name": "夜空",
+    "color": "#5a5d82"
+   },
+   {
+    "name": "月と星",
+    "color": "#e6c693"
+   },
+   {
+    "name": "枠",
+    "color": "#a59a96"
+   }
+  ]
+ },
+ "poster_mountain": {
+  "wall": {
+   "s": 0.0,
+   "a": 5.0,
+   "b": 265.0
+  },
+  "parts": [
+   {
+    "name": "背景",
+    "color": "#ece5cb"
+   },
+   {
+    "name": "山",
+    "color": "#6c8b8b"
+   },
+   {
+    "name": "枠と太陽",
+    "color": "#d7ae5b"
+   }
+  ]
+ },
  "rug": {
   "corners": [
    [
@@ -297,6 +445,105 @@
    {
     "name": "ふさ",
     "color": "#7c4e6b"
+   }
+  ]
+ },
+ "rug_check": {
+  "topdown": true,
+  "parts": [
+   {
+    "name": "マス 1",
+    "color": "#ede9d3"
+   },
+   {
+    "name": "マス 2",
+    "color": "#708759"
+   }
+  ]
+ },
+ "rug_diamond": {
+  "topdown": true,
+  "parts": [
+   {
+    "name": "地",
+    "color": "#b45952"
+   },
+   {
+    "name": "ひし形",
+    "color": "#d3bc9f"
+   },
+   {
+    "name": "ふち",
+    "color": "#734b4f"
+   }
+  ]
+ },
+ "rug_flower": {
+  "topdown": true,
+  "parts": [
+   {
+    "name": "地",
+    "color": "#b39fbe"
+   },
+   {
+    "name": "花",
+    "color": "#f4f0f0"
+   },
+   {
+    "name": "花の中",
+    "color": "#bc9d53"
+   }
+  ]
+ },
+ "rug_round": {
+  "topdown": true,
+  "parts": [
+   {
+    "name": "地",
+    "color": "#67859a"
+   },
+   {
+    "name": "ふち",
+    "color": "#ebe9d8"
+   }
+  ]
+ },
+ "rug_runner": {
+  "topdown": true,
+  "parts": [
+   {
+    "name": "地",
+    "color": "#707b87"
+   },
+   {
+    "name": "ジグザグ",
+    "color": "#e9e6da"
+   }
+  ]
+ },
+ "rug_stripe": {
+  "topdown": true,
+  "parts": [
+   {
+    "name": "地",
+    "color": "#d5c4ae"
+   },
+   {
+    "name": "しま",
+    "color": "#b37059"
+   }
+  ]
+ },
+ "rug_wave": {
+  "topdown": true,
+  "parts": [
+   {
+    "name": "地",
+    "color": "#d0b893"
+   },
+   {
+    "name": "波",
+    "color": "#4c7c83"
    }
   ]
  },
@@ -453,35 +700,39 @@
  },
  "window": {
   "wall": {
-   "s": 0.5004,
-   "a": -49.2,
-   "b": 435.0
+   "s": -0.0,
+   "a": 4.0,
+   "b": 235.0
   },
   "parts": [
    {
     "name": "カーテン",
-    "color": "#743d49"
+    "color": "#b15759"
    },
    {
     "name": "窓枠",
-    "color": "#564d50"
+    "color": "#745649"
    },
    {
     "name": "ガラス",
-    "color": "#a1b5c0"
+    "color": "#acd4ea"
    }
   ]
  },
  "window2": {
   "wall": {
-   "s": -0.5867,
-   "a": 136.1,
-   "b": 646.1
+   "s": -0.0,
+   "a": 5.0,
+   "b": 311.0
   },
   "parts": [
    {
-    "name": "本体",
-    "color": "#503446"
+    "name": "窓枠",
+    "color": "#755747"
+   },
+   {
+    "name": "ガラス",
+    "color": "#374d72"
    }
   ]
  }

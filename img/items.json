@@ -1,1 +1,146 @@
-{}
+{
+ "picture": {
+  "kind": "wall",
+  "name": "絵（風景）",
+  "price": 600,
+  "size": 2,
+  "y": 1.25
+ },
+ "window": {
+  "kind": "wall",
+  "name": "窓",
+  "price": 900,
+  "size": 3,
+  "y": 0.85
+ },
+ "window2": {
+  "kind": "wall",
+  "name": "窓（アーチ）",
+  "price": 1000,
+  "size": 2,
+  "y": 0.8
+ },
+ "poster_mountain": {
+  "kind": "wall",
+  "name": "山のポスター",
+  "price": 450,
+  "size": 2,
+  "y": 0.95
+ },
+ "poster_cat": {
+  "kind": "wall",
+  "name": "ねこのポスター",
+  "price": 350,
+  "size": 1,
+  "y": 1.2
+ },
+ "poster_moon": {
+  "kind": "wall",
+  "name": "月と星のポスター",
+  "price": 350,
+  "size": 1,
+  "y": 1.2
+ },
+ "clock": {
+  "kind": "wall",
+  "name": "壁かけ時計",
+  "price": 500,
+  "size": 1,
+  "y": 1.5
+ },
+ "mirror": {
+  "kind": "wall",
+  "name": "鏡",
+  "price": 700,
+  "size": 1,
+  "y": 1.0
+ },
+ "garland": {
+  "kind": "wall",
+  "name": "ガーランド",
+  "price": 300,
+  "size": 3,
+  "y": 1.7
+ },
+ "rug_stripe": {
+  "kind": "rug",
+  "name": "しま模様のラグ",
+  "price": 650,
+  "size": [
+   3,
+   4
+  ]
+ },
+ "rug_round": {
+  "kind": "rug",
+  "name": "丸いラグ",
+  "price": 600,
+  "size": [
+   3,
+   3
+  ]
+ },
+ "rug_check": {
+  "kind": "rug",
+  "name": "チェックのラグ",
+  "price": 650,
+  "size": [
+   3,
+   4
+  ]
+ },
+ "rug_diamond": {
+  "kind": "rug",
+  "name": "ひし形のラグ",
+  "price": 700,
+  "size": [
+   3,
+   4
+  ]
+ },
+ "rug_flower": {
+  "kind": "rug",
+  "name": "花柄のラグ",
+  "price": 700,
+  "size": [
+   3,
+   3
+  ]
+ },
+ "rug_runner": {
+  "kind": "rug",
+  "name": "細長いラグ",
+  "price": 400,
+  "size": [
+   1,
+   4
+  ]
+ },
+ "rug_wave": {
+  "kind": "rug",
+  "name": "波のラグ",
+  "price": 550,
+  "size": [
+   2,
+   3
+  ]
+ },
+ "mat_small": {
+  "kind": "rug",
+  "name": "小さなマット",
+  "price": 200,
+  "size": [
+   2,
+   1
+  ]
+ },
+ "mat_round": {
+  "kind": "rug",
+  "name": "丸いマット",
+  "price": 300,
+  "size": [
+   2,
+   2
+  ]
+ }
+}
