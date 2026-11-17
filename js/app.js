@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.10.4';
+const APP_VERSION = '0.10.5';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 3; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに
 
@@ -687,7 +687,11 @@ function renderBackground() {
     g.imageSmoothingQuality = 'high';
     drawRoom(g);
     // 壁掛け → 敷物 → 選んだ印 → 床の家具の影
-    for (const it of game.items) if (kindOf(it) === 'wall') drawArt(g, it);
+    for (const it of game.items) {
+        if (kindOf(it) !== 'wall') continue;
+        if (it.uid === selectedUid) drawOutline(g, it); // 選んだ壁掛けは、絵の形どおりにふちを付ける
+        drawArt(g, it);
+    }
     for (const it of game.items) if (kindOf(it) === 'flat') drawArt(g, it);
     drawMarker(g);
     for (const it of game.items) if (kindOf(it) === 'floor') { const [w, d] = footprint(it); floorShadow(g, it.gx, it.gz, w, d); }
@@ -715,10 +719,8 @@ function drawMarker(g) {
     if (!it) return;
     const kind = kindOf(it), red = isBlocked(it);
     let pts;
-    if (kind === 'wall') {
-        const p = placeOf(it), h = wallHeight(FURNITURE[it.type]);
-        pts = [P(p.gx, p.gz, p.lift), P(p.gx + p.w, p.gz + p.d, p.lift), P(p.gx + p.w, p.gz + p.d, p.lift + h), P(p.gx, p.gz, p.lift + h)];
-    } else {
+    if (kind === 'wall') return; // 壁掛けの印は、絵の形のふち（drawOutline）
+    {
         g.strokeStyle = 'rgba(60, 40, 30, 0.12)'; g.lineWidth = 1;
         for (let k = 1; k < N; k++) {
             g.beginPath(); g.moveTo(...P(k, 0)); g.lineTo(...P(k, N)); g.stroke();
@@ -734,6 +736,35 @@ function drawMarker(g) {
     g.strokeStyle = red ? '#d9534f' : '#d9774b'; g.lineWidth = 2;
     g.stroke();
     g.setLineDash([]);
+}
+
+// 絵の形のふち: 絵の形を塗りつぶした影を、少しずつずらして重ねる（このあと絵を上に描くと、ふちだけが残る）
+const outlineCache = new Map();
+function silhouette(im, color) {
+    const key = `${im.img.src}|${color}`;
+    if (outlineCache.has(key)) return outlineCache.get(key);
+    const c = document.createElement('canvas');
+    c.width = im.w; c.height = im.h;
+    const g = c.getContext('2d');
+    g.drawImage(im.img, 0, 0);
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = color;
+    g.fillRect(0, 0, c.width, c.height);
+    outlineCache.set(key, c);
+    return c;
+}
+function drawOutline(g, it) {
+    const mx = artMatrix(it);
+    if (!mx.im) return;
+    const sil = silhouette(mx.im, isBlocked(it) ? '#d9534f' : '#e8844f');
+    const r = 2.5 / Math.sqrt(Math.abs(mx.m[0] * mx.m[3] - mx.m[1] * mx.m[2])); // 部屋の 2.5px を絵の大きさに直す
+    for (let a = 0; a < 8; a++) {
+        const dx = Math.cos(a * Math.PI / 4) * r, dy = Math.sin(a * Math.PI / 4) * r;
+        g.save();
+        g.transform(...mx.m);
+        g.drawImage(sil, dx, dy);
+        g.restore();
+    }
 }
 
 // ---------- 選択と操作 ----------
