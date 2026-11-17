@@ -286,6 +286,7 @@ await test('家具の色合いを変えて保存し、元の色に戻せる', as
     await L('L.select(null)');
     await L('L.render()');
     const at = await L(`L.screenOf(4, 0.55)`); // ソファ
+    const cyBefore = await L('L.view.cy');
     const px0 = await L(`L.pixelAt(${at.x}, ${at.y})`);
     await L('L.select(4)');
     await evaluate(`document.getElementById('color-btn').click()`);
@@ -300,19 +301,39 @@ await test('家具の色合いを変えて保存し、元の色に戻せる', as
     const px1 = await L(`L.pixelAt(${at.x}, ${at.y})`);
     assert(Math.abs(px1[0] - px0[0]) + Math.abs(px1[1] - px0[1]) + Math.abs(px1[2] - px0[2]) > 30, `色が変わらない: ${px0} → ${px1}`);
     const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker2d_save')).items.find(i => i.uid === 4).tint`);
-    assert(saved && saved.h === 150, `保存されていない: ${JSON.stringify(saved)}`);
+    assert(saved && saved.all && saved.all.h === 150, `保存されていない: ${JSON.stringify(saved)}`);
     await shot('tint');
     // 見本のボタンで選ぶ
     await evaluate(`[...document.querySelectorAll('#tint-presets button')].find(b => b.textContent === 'モノクロ').click()`);
-    assert((await item(4)).tint?.s === 0, 'モノクロにならない');
+    assert((await item(4)).tint?.all?.s === 0, 'モノクロにならない');
     await evaluate(`document.getElementById('tint-reset').click()`);
     assert(!(await item(4)).tint, '元の色に戻らない');
-    const cyOpen = await L('L.view.cy');
     await evaluate(`document.getElementById('tint-close').click()`);
-    assert(await L('L.view.cy') !== cyOpen, '閉じても部屋の位置が戻らない');
+    await sleep(50); // close の知らせは少し遅れて届く
+    assert(await L('L.view.cy') === cyBefore, `閉じても部屋の位置が戻らない: ${cyBefore} → ${await L('L.view.cy')}`);
     await L('L.undo()');
-    assert((await item(4)).tint?.s === 0, '元に戻すで色合いが戻らない');
+    assert((await item(4)).tint?.all?.s === 0, '元に戻すで色合いが戻らない');
     await L('L.redo()');
+});
+
+await test('色合いは部分ごとにも変えられる', async () => {
+    await L('L.select(2)'); // ベッド
+    await L('L.openTint(2)');
+    const parts = await evaluate(`[...document.querySelectorAll('#tint-parts .tint-part')].map(b => b.textContent)`);
+    assert(parts.length >= 3 && parts[0] === 'ぜんぶ', `部分のボタン: ${parts}`);
+    await evaluate(`document.querySelectorAll('#tint-parts .tint-part')[1].click()`);
+    await evaluate(`(() => { const i = document.getElementById('tint-h'); i.value = 90; i.dispatchEvent(new Event('input')); i.dispatchEvent(new Event('change')); })()`);
+    let t = (await item(2)).tint;
+    assert(t && t['1']?.h === 90 && !t.all && !t['2'], `1 番の部分だけ変わっていない: ${JSON.stringify(t)}`);
+    // 「ぜんぶ」で変えると、部分ごとの色合いは消えてそろう
+    await evaluate(`document.querySelectorAll('#tint-parts .tint-part')[0].click()`);
+    await evaluate(`(() => { const i = document.getElementById('tint-l'); i.value = 80; i.dispatchEvent(new Event('input')); i.dispatchEvent(new Event('change')); })()`);
+    t = (await item(2)).tint;
+    assert(t && t.all?.l === 80 && !t['1'], `全部がそろっていない: ${JSON.stringify(t)}`);
+    await evaluate(`document.getElementById('tint-reset').click()`);
+    assert(!(await item(2)).tint, '元の色に戻らない');
+    await evaluate(`document.getElementById('tint-close').click()`);
+    await sleep(50);
 });
 
 await test('しまうと消える', async () => {
@@ -380,15 +401,17 @@ await test('住人がいて、家具を避けて歩く', async () => {
 });
 
 await test('歩く向きで絵が変わる（手前は前向き、奥は後ろ姿）', async () => {
-    const look = (dx, dz) => R(`(() => { R.place(8, 7); R.walkTo(${8 + dx}, ${7 + dz}); R.step(0.2); return R.state().frame; })()`);
+    // 少しずつ歩かせて、出た絵を集める
+    const look = (dx, dz) => R(`(() => { R.place(8, 7); R.walkTo(${8 + dx}, ${7 + dz}); const out = []; for (let i = 0; i < 12; i++) { R.step(0.05); if (R.state().mode === 'walk') out.push(R.state().frame); } return out; })()`);
     const front = await look(0, 1.2);   // 左下へ
     const right = await look(1.2, 0);   // 右下へ
     const back = await look(0, -1.2);   // 右上へ
     const backL = await look(-1.2, 0);  // 左上へ
-    assert([2, 3].includes(front.n) && !front.flip, `左下へ歩く絵: ${JSON.stringify(front)}`);
-    assert([2, 3].includes(right.n) && right.flip, `右下へ歩く絵: ${JSON.stringify(right)}`);
-    assert(back.n === 4 && !back.flip, `右上へ歩く絵: ${JSON.stringify(back)}`);
-    assert(backL.n === 4 && backL.flip, `左上へ歩く絵: ${JSON.stringify(backL)}`);
+    const ns = (fs) => [...new Set(fs.map(f => f.n))].sort().join(',');
+    assert(ns(front) === '1,2,3' && front.every(f => !f.flip), `左下へ歩く絵（右足・立ち・左足が出る）: ${JSON.stringify(front)}`);
+    assert(ns(right) === '1,2,3' && right.every(f => f.flip), `右下へ歩く絵: ${JSON.stringify(right)}`);
+    assert(ns(back) === '4' && back.every(f => !f.flip), `右上へ歩く絵: ${JSON.stringify(back)}`);
+    assert(ns(backL) === '4' && backL.every(f => f.flip), `左上へ歩く絵: ${JSON.stringify(backL)}`);
 });
 
 await test('住人はソファに座り、ソファを動かすと立つ', async () => {
@@ -461,6 +484,17 @@ await test('設定で名前を付けられ、住人を隠せて、保存され�
     await evaluate(`(() => { const c = document.getElementById('resident-toggle'); c.checked = true; c.dispatchEvent(new Event('change')); })()`);
     await evaluate(`document.getElementById('menu-close').click()`);
     assert((await R('R.state()')).visible, '戻らない');
+});
+
+await test('住人が止まっている間は描き直さない（電池のため）', async () => {
+    await R('R.freeze(true, false)');
+    await R('R.place(5, 8.5)');
+    await sleep(300);
+    const n0 = await L('L.renders()');
+    await sleep(1000);
+    const n1 = await L('L.renders()');
+    assert(n1 - n0 <= 2, `止まっているのに描き直している: ${n1 - n0} 回`);
+    await R('R.freeze(false, false)');
 });
 
 await test('住人がひとりで動き続けても止まらない', async () => {

@@ -2,6 +2,7 @@
 
 使い方: python tools/cut_sprites.py
 ゲームで使う軽い版（WebP）も img/ に書き出す（家具は長い辺 600px まで、住人は高さ 300px）。
+最後に tools/sprite_meta.py で、床の角と色の部分を求める。
 - 家具: 1 枚に 1 つ。いちばん大きなまとまりの周りで切り抜く。
 - 住人（resident.*）: 4 列 × 2 行の一覧表。1 人ずつ切り出し、resident_1.png 〜 resident_8.png にする。
   足元をそろえるため、同じ大きさのキャンバスに「下端中央」をそろえて置く。
@@ -103,3 +104,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+    import sprite_meta
+    sprite_meta.main()

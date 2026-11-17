@@ -1,14 +1,15 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.9.0';
+const APP_VERSION = '0.10.0';
 const SAVE_KEY = 'lifemaker2d_save';
-const SAVE_VERSION = 2; // 2: 小物・壁掛け・色合いを追加
+const SAVE_VERSION = 3; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに
 
 // ---------- 部屋の大きさと見え方 ----------
 // 1 マス 0.5m、N×N マス。gx は右下へ、gz は左下へ伸びる（奥の角が原点）。y は高さ（m）
 const N = 10;
-const CELL_W = 64, CELL_H = 32; // 1 マスの、画面での横幅・高さ（px、拡大 1 のとき）
+// 床の傾きは 30 度（AIの絵がこの角度で描かれているため。横 2 に対して縦 1.15）
+const CELL_W = 64, CELL_H = 37; // 1 マスの、画面での横幅・高さ（px、拡大 1 のとき）
 const PX_PER_M = 80;            // 高さ 1m の画面での長さ
 const WALL_H = 2.5;
 function P(gx, gz, y = 0) { return [(gx - gz) * CELL_W / 2, (gx + gz) * CELL_H / 2 - y * PX_PER_M]; }
@@ -30,7 +31,7 @@ const FURNITURE = {
     bed: { name: 'ベッド', size: [2, 4], art: 'bed', use: 'lie', lines: ['おやすみ…', 'すやすや'] },
     sofa: { name: 'ソファ', size: [4, 2], art: 'sofa', use: 'sit', seats: [0.3, 0.7], lines: ['ふう、ひと休み', 'このソファ、ふかふか', 'のんびりしよう'] },
     chair: { name: 'いす', size: [1, 1], art: 'chair', use: 'sit', seats: [0.5], lines: ['ちょっと座ろう', 'いすがちょうどいい'] },
-    table: { name: 'テーブル', size: [3, 2], art: 'table', top: 0.78, use: 'look', lines: ['ごはん、何にしよう', 'お茶にしよう'] },
+    table: { name: 'テーブル', size: [2, 3], art: 'table', top: 0.78, use: 'look', lines: ['ごはん、何にしよう', 'お茶にしよう'] },
     lowtable: { name: 'ローテーブル', size: [2, 2], art: 'lowtable', fitHeight: 0.45, top: 0.42, use: 'look', lines: ['いい香り', 'ひと息つこう'] },
     desk: { name: '机', size: [2, 1], art: 'desk', top: 0.72, use: 'look', lines: ['ちょっと調べもの', 'がんばるぞ'] },
     bookshelf: { name: '本棚', size: [2, 1], art: 'bookshelf', use: 'look', lines: ['何を読もうかな', 'この本、おもしろそう'] },
@@ -113,10 +114,23 @@ function clampItem(item) {
 }
 // 色合い: h 色合い（-180〜180）、s 鮮やかさ（0〜200%）、l 明るさ（50〜150%）。元の色なら持たない
 const TINT_DEFAULT = { h: 0, s: 100, l: 100 };
-function sanitizeTint(t) {
+// 色合い: 部分の番号（1, 2, …）または all（全部）ごとに { h 色合い -180〜180, s 鮮やかさ 0〜200%, l 明るさ 50〜150% }。
+// 部分の色合いがなければ all を使う。元の色なら持たない。v0.9 の { h, s, l } は all として読む
+function sanitizeOne(t) {
     if (!t || typeof t !== 'object') return null;
     const out = { h: Math.round(Math.min(180, Math.max(-180, num(t.h)))), s: Math.round(Math.min(200, Math.max(0, num(t.s ?? 100)))), l: Math.round(Math.min(150, Math.max(50, num(t.l ?? 100)))) };
     return out.h === 0 && out.s === 100 && out.l === 100 ? null : out;
+}
+function sanitizeTint(t) {
+    if (!t || typeof t !== 'object') return null;
+    if ('h' in t || 's' in t || 'l' in t) { const one = sanitizeOne(t); return one ? { all: one } : null; }
+    const out = {};
+    for (const k of Object.keys(t)) {
+        if (k !== 'all' && !/^[1-9]$/.test(k)) continue;
+        const one = sanitizeOne(t[k]);
+        if (one) out[k] = one;
+    }
+    return Object.keys(out).length ? out : null;
 }
 // 家具の一覧の形をそろえる。重複・知らない家具を除き、部屋からはみ出すものは中に入れる
 function sanitizeItems(list) {
@@ -268,35 +282,48 @@ function findFreeSpot(item) {
 }
 
 // ---------- 絵 ----------
-// 絵ごとに、当たり判定用の不透明の地図も作る
-const images = new Map(); // name → { img, w, h, alpha, data }
-function loadImage(name) {
+// 絵ごとに、当たり判定用の不透明の地図と、色の部分の地図（img/<名前>_parts.png）も作る
+const images = new Map(); // name → { img, w, h, alpha, data, parts }
+let spriteMeta = {};      // img/sprites.json: 床の角（corners）と色の部分（parts: [{ name, color }]）
+function readPixels(img) {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    try { return g.getImageData(0, 0, c.width, c.height); } catch (e) { return null; } // file:// などで読めないとき
+}
+function loadPicture(src) {
     return new Promise((resolve) => {
         const img = new Image();
-        img.onload = () => {
-            const c = document.createElement('canvas');
-            c.width = img.naturalWidth; c.height = img.naturalHeight;
-            const g = c.getContext('2d', { willReadFrequently: true });
-            g.drawImage(img, 0, 0);
-            let alpha = null, data = null;
-            try {
-                data = g.getImageData(0, 0, c.width, c.height);
-                alpha = new Uint8Array(c.width * c.height);
-                for (let i = 0; i < alpha.length; i++) alpha[i] = data.data[i * 4 + 3];
-            } catch (e) { /* file:// などで読めないときは四角で判定し、色合いは変えない */ }
-            images.set(name, { img, w: img.naturalWidth, h: img.naturalHeight, alpha, data });
-            resolve();
-        };
-        img.onerror = () => { console.error('絵を読めません: ' + name); resolve(); };
-        img.src = `img/${name}.webp?v=${APP_VERSION}`;
+        img.onload = () => resolve(img);
+        img.onerror = () => { console.error('絵を読めません: ' + src); resolve(null); };
+        img.src = `${src}?v=${APP_VERSION}`;
     });
 }
-const RESIDENT_FRAMES = { stand: 1, walkA: 2, walkB: 3, back: 4, sit: 5, lie: 6, happy: 7, wave: 8 };
-function loadAll() {
-    const names = Object.values(FURNITURE).map(d => d.art);
-    for (const n of Object.values(RESIDENT_FRAMES)) names.push(`resident_${n}`);
-    return Promise.all(names.map(loadImage));
+async function loadImage(name, withParts) {
+    const [img, partsImg] = await Promise.all([loadPicture(`img/${name}.webp`), withParts ? loadPicture(`img/${name}_parts.png`) : null]);
+    if (!img) return;
+    const data = readPixels(img);
+    let alpha = null, parts = null;
+    if (data) {
+        alpha = new Uint8Array(img.naturalWidth * img.naturalHeight);
+        for (let i = 0; i < alpha.length; i++) alpha[i] = data.data[i * 4 + 3];
+    }
+    const pd = partsImg && readPixels(partsImg);
+    if (pd && pd.width === img.naturalWidth && pd.height === img.naturalHeight) {
+        parts = new Uint8Array(pd.width * pd.height);
+        for (let i = 0; i < parts.length; i++) parts[i] = pd.data[i * 4];
+    }
+    images.set(name, { img, w: img.naturalWidth, h: img.naturalHeight, alpha, data, parts });
 }
+const RESIDENT_FRAMES = { stand: 1, walkA: 2, walkB: 3, back: 4, sit: 5, lie: 6, happy: 7, wave: 8 };
+async function loadAll() {
+    try { spriteMeta = await (await fetch(`img/sprites.json?v=${APP_VERSION}`)).json(); } catch (e) { console.error(e); spriteMeta = {}; }
+    const jobs = Object.values(FURNITURE).map(d => loadImage(d.art, !!spriteMeta[d.art]?.parts));
+    for (const n of Object.values(RESIDENT_FRAMES)) jobs.push(loadImage(`resident_${n}`, false));
+    await Promise.all(jobs);
+}
+function partsOf(art) { return spriteMeta[art]?.parts || []; }
 
 // ---- 色合いを変えた絵（作ったものは覚えておく） ----
 const tintCache = new Map();
@@ -312,30 +339,38 @@ function hue2rgb(p, q, t) {
     if (t < 0) t += 1; if (t > 1) t -= 1;
     return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p;
 }
+// 部分 n に当てる色合い（なければ all、それもなければ null）
+function tintFor(tint, n) { return tint ? (tint[n] || tint.all || null) : null; }
 function tintedSource(name, tint) {
     const im = images.get(name);
     if (!im) return null;
     if (!tint || !im.data) return im.img;
-    const key = `${name}|${tint.h}|${tint.s}|${tint.l}`;
+    const key = `${name}|${JSON.stringify(tint)}`;
     if (tintCache.has(key)) { const c = tintCache.get(key); tintCache.delete(key); tintCache.set(key, c); return c; }
+    // 部分ごとの変え方を先に用意する（0 は線。線は all のときだけ明るさを合わせる）
+    const ways = [];
+    for (let n = 0; n < 10; n++) {
+        const t = n === 0 ? (tint.all ? { h: 0, s: 100, l: tint.all.l } : null) : tintFor(tint, n);
+        ways.push(t ? { dh: t.h / 360, ks: t.s / 100, kl: t.l / 100 } : null);
+    }
     const c = document.createElement('canvas');
     c.width = im.w; c.height = im.h;
-    const out = new ImageData(im.w, im.h), src = im.data.data, dst = out.data;
-    const dh = tint.h / 360, ks = tint.s / 100, kl = tint.l / 100;
-    for (let i = 0; i < src.length; i += 4) {
-        const a = src[i + 3];
-        if (!a) continue;
-        let [h, s, l] = rgbToHsl(src[i] / 255, src[i + 1] / 255, src[i + 2] / 255);
-        h = (h + dh + 1) % 1;
-        s = Math.min(1, s * ks);
-        l = kl <= 1 ? l * kl : l + (1 - l) * (kl - 1) * 0.8;
+    const out = new ImageData(new Uint8ClampedArray(im.data.data), im.w, im.h), dst = out.data;
+    for (let i = 0, p = 0; i < dst.length; i += 4, p++) {
+        if (!dst[i + 3]) continue;
+        const w = ways[im.parts ? im.parts[p] : 1];
+        if (!w) continue;
+        let [h, s, l] = rgbToHsl(dst[i] / 255, dst[i + 1] / 255, dst[i + 2] / 255);
+        h = (h + w.dh + 1) % 1;
+        s = Math.min(1, s * w.ks);
+        l = w.kl <= 1 ? l * w.kl : l + (1 - l) * (w.kl - 1) * 0.8;
         let r, g, b;
         if (s === 0) r = g = b = l;
         else {
-            const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
-            r = hue2rgb(p, q, h + 1 / 3); g = hue2rgb(p, q, h); b = hue2rgb(p, q, h - 1 / 3);
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s, pp = 2 * l - q;
+            r = hue2rgb(pp, q, h + 1 / 3); g = hue2rgb(pp, q, h); b = hue2rgb(pp, q, h - 1 / 3);
         }
-        dst[i] = r * 255; dst[i + 1] = g * 255; dst[i + 2] = b * 255; dst[i + 3] = a;
+        dst[i] = r * 255; dst[i + 1] = g * 255; dst[i + 2] = b * 255;
     }
     c.getContext('2d').putImageData(out, 0, 0);
     tintCache.set(key, c);
@@ -343,41 +378,112 @@ function tintedSource(name, tint) {
     return c;
 }
 
-// 家具の絵を置く四角（部屋の座標）。足元の四角の左端・右端・下端に合わせる
-function artRect(item) {
+// ---- 絵の置き方（行列） ----
+// 行列 [a, b, c, d, e, f]: 絵の点 (u, v) → 部屋の点 (a u + c v + e, b u + d v + f)
+function solveAffine(src, dst) {
+    // 3 点の対応から行列を求める
+    const [[x0, y0], [x1, y1], [x2, y2]] = src, [[X0, Y0], [X1, Y1], [X2, Y2]] = dst;
+    const det = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
+    const a = ((X1 - X0) * (y2 - y0) - (X2 - X0) * (y1 - y0)) / det;
+    const c = ((X2 - X0) * (x1 - x0) - (X1 - X0) * (x2 - x0)) / det;
+    const b = ((Y1 - Y0) * (y2 - y0) - (Y2 - Y0) * (y1 - y0)) / det;
+    const d = ((Y2 - Y0) * (x1 - x0) - (Y1 - Y0) * (x2 - x0)) / det;
+    return [a, b, c, d, X0 - a * x0 - c * y0, Y0 - b * x0 - d * y0];
+}
+function mul(m, n) { // m のあとに n ではなく、m・n（n を先に当てる）
+    return [m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1], m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3], m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5]];
+}
+function invert(m) {
+    const det = m[0] * m[3] - m[1] * m[2];
+    return [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det, (m[2] * m[5] - m[3] * m[4]) / det, (m[1] * m[4] - m[0] * m[5]) / det];
+}
+function apply(m, x, y) { return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; }
+// 家具の絵の置き方。床の角が分かっている絵は、その 3 点を床のマス目の角に合わせる（絵ごとの傾きの違いを直す）。
+// それ以外は、足元の四角の横幅（fitHeight があれば高さ）に合わせて縮める。rot 1 は左右反転
+function artMatrix(item) {
     const def = FURNITURE[item.type], im = images.get(def.art);
     const { gx, gz, w, d, lift } = placeOf(item);
-    const left = P(gx, gz + d)[0], right = P(gx + w, gz)[0], bottom = P(gx + w, gz + d, lift)[1];
-    const flip = !!item.rot, src = tintedSource(def.art, item.tint);
-    if (!im) return { x: left, y: bottom - 100, w: right - left, h: 100, flip, im: null, src };
-    if (def.fitHeight) {
-        // 高さに合わせて縮め、足元の四角の真ん中にそろえる
-        const k = (def.fitHeight * PX_PER_M + (w + d) * CELL_H / 2) / im.h, cx = (left + right) / 2;
-        return { x: cx - im.w * k / 2, y: bottom - im.h * k, w: im.w * k, h: im.h * k, flip, im, src };
+    const src = tintedSource(def.art, item.tint);
+    if (!im) return { m: [1, 0, 0, 1, 0, 0], im: null, src };
+    const flip = item.rot ? [-1, 0, 0, 1, im.w, 0] : [1, 0, 0, 1, 0, 0]; // 絵を左右反転
+    const L = P(gx, gz + d, lift), B = P(gx + w, gz + d, lift), R = P(gx + w, gz, lift);
+    const cs = spriteMeta[def.art]?.corners;
+    if (cs && !def.fitHeight) {
+        // 反転した絵では、左右の角が入れ替わる
+        const f = (p) => apply(flip, p[0], p[1]);
+        const srcPts = item.rot ? [f(cs[2]), f(cs[1]), f(cs[0])] : cs;
+        return { m: mul(solveAffine(srcPts, [L, B, R]), flip), im, src };
     }
-    const k = (right - left) / im.w;
-    return { x: left, y: bottom - im.h * k, w: right - left, h: im.h * k, flip, im, src };
+    let k, x0, y0;
+    if (def.fitHeight) {
+        k = (def.fitHeight * PX_PER_M + (w + d) * CELL_H / 2) / im.h;
+        x0 = (L[0] + R[0]) / 2 - im.w * k / 2;
+    } else {
+        k = (R[0] - L[0]) / im.w;
+        x0 = L[0];
+    }
+    y0 = B[1] - im.h * k;
+    return { m: mul([k, 0, 0, k, x0, y0], flip), im, src };
 }
-function drawImageRect(g, r) {
-    const src = r.src || r.im?.img;
+// 絵の四角が部屋のどこに来るか（当たり判定・画面の位置合わせに使う）
+function boundsOf(mx) {
+    const im = mx.im, pts = im ? [[0, 0], [im.w, 0], [0, im.h], [im.w, im.h]].map(([u, v]) => apply(mx.m, u, v)) : [[0, 0]];
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+}
+function artRect(item) { return boundsOf(artMatrix(item)); }
+// 縮めて描くと重いので、表示の大きさに合わせて縮めた絵を作っておく（拡大率ごと）
+const scaledCache = new Map();
+let scaledIds = new WeakMap(), scaledNext = 1;
+function scaledSource(src, k) {
+    if (k >= 0.9) return { c: src, k: 1 };
+    const q = Math.pow(2, Math.ceil(Math.log2(k) * 4) / 4); // 4 分の 1 オクターブ刻み（少し大きめ）
+    if (!scaledIds.has(src)) scaledIds.set(src, scaledNext++);
+    const key = `${scaledIds.get(src)}|${q}`;
+    if (scaledCache.has(key)) return { c: scaledCache.get(key), k: q };
+    let cur = src, cw = src.width || src.naturalWidth, ch = src.height || src.naturalHeight;
+    const tw = Math.max(1, Math.round(cw * q)), th = Math.max(1, Math.round(ch * q));
+    // 半分ずつ縮めると、細い線がつぶれにくい
+    while (cw / 2 > tw) {
+        const c = document.createElement('canvas');
+        c.width = Math.round(cw / 2); c.height = Math.round(ch / 2);
+        c.getContext('2d').drawImage(cur, 0, 0, c.width, c.height);
+        cur = c; cw = c.width; ch = c.height;
+    }
+    const out = document.createElement('canvas');
+    out.width = tw; out.height = th;
+    const g = out.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(cur, 0, 0, tw, th);
+    scaledCache.set(key, out);
+    if (scaledCache.size > 300) scaledCache.delete(scaledCache.keys().next().value);
+    return { c: out, k: q };
+}
+function drawMatrix(g, m, src, srcW) {
     if (!src) return;
-    if (r.flip) {
-        g.save();
-        g.translate(r.x + r.w, r.y);
-        g.scale(-1, 1);
-        g.drawImage(src, 0, 0, r.w, r.h);
-        g.restore();
-    } else g.drawImage(src, r.x, r.y, r.w, r.h);
+    // 画面での縮み具合（行列の大きさ × 拡大率）に合わせて、前もって縮めた絵を使う
+    const k = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) * view.scale * view.dpr;
+    const s = scaledSource(src, k), w = srcW || src.width || src.naturalWidth;
+    const r = w / (s.c.width || 1);
+    g.save();
+    g.transform(...mul(m, [r, 0, 0, r, 0, 0]));
+    g.drawImage(s.c, 0, 0);
+    g.restore();
+}
+function drawArt(g, item) {
+    const mx = artMatrix(item);
+    if (mx.im) drawMatrix(g, mx.m, mx.src, mx.im.w);
 }
 // 部屋の点 (x, y) が絵の不透明な所に当たるか
-function hitRect(r, x, y) {
-    if (x < r.x || x > r.x + r.w || y < r.y || y > r.y + r.h) return false;
-    if (!r.im || !r.im.alpha) return true;
-    let u = (x - r.x) / r.w;
-    if (r.flip) u = 1 - u;
-    const px = Math.min(r.im.w - 1, Math.floor(u * r.im.w)), py = Math.min(r.im.h - 1, Math.floor((y - r.y) / r.h * r.im.h));
-    return r.im.alpha[py * r.im.w + px] > 60;
+function hitMatrix(mx, x, y) {
+    if (!mx.im) return false;
+    const [u, v] = apply(invert(mx.m), x, y);
+    if (u < 0 || v < 0 || u >= mx.im.w || v >= mx.im.h) return false;
+    if (!mx.im.alpha) return true;
+    return mx.im.alpha[Math.floor(v) * mx.im.w + Math.floor(u)] > 60;
 }
+// 住人の絵（四角）
+function rectMatrix(r) { return { m: mul([r.w / r.im.w, 0, 0, r.h / r.im.h, r.x, r.y], r.flip ? [-1, 0, 0, 1, r.im.w, 0] : [1, 0, 0, 1, 0, 0]), im: r.im }; }
 
 // ---- 形を描く小さな関数（部屋） ----
 function path(g, pts) { g.beginPath(); g.moveTo(...pts[0]); for (let i = 1; i < pts.length; i++) g.lineTo(...pts[i]); g.closePath(); }
@@ -545,23 +651,41 @@ function buildDrawList() {
     }
     return list;
 }
-function drawItem(g, it) {
-    const kind = kindOf(it);
-    if (kind === 'floor') { const [w, d] = footprint(it); floorShadow(g, it.gx, it.gz, w, d); }
-    drawImageRect(g, artRect(it));
-}
-function render() {
-    const g = ctx;
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.clearRect(0, 0, canvas.width, canvas.height);
+// 床の家具の影は、取っておく背景の方に描く
+function drawItem(g, it) { drawArt(g, it); }
+// 部屋の床・壁・壁掛け・敷物・選んだ印・床の家具の影は、変わったときだけ描き直す（住人が動くたびには描かない）
+const bgCanvas = document.createElement('canvas');
+let bgKey = '';
+function worldTransform(g) {
     const s = view.scale * view.dpr;
     g.setTransform(s, 0, 0, s, (view.w / 2 - view.cx * view.scale) * view.dpr, (view.h / 2 - view.cy * view.scale) * view.dpr);
+}
+function renderBackground() {
+    const key = [view.scale, view.cx, view.cy, view.w, view.h, view.dpr, selectedUid, JSON.stringify(game.items), images.size].join('|');
+    if (key === bgKey && bgCanvas.width === canvas.width && bgCanvas.height === canvas.height) return;
+    bgKey = key;
+    bgCanvas.width = canvas.width; bgCanvas.height = canvas.height;
+    const g = bgCanvas.getContext('2d');
+    g.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+    worldTransform(g);
     g.imageSmoothingQuality = 'high';
     drawRoom(g);
-    // 壁掛け → 敷物 → 選んだ印 → 家具と住人（奥から）
-    for (const it of game.items) if (kindOf(it) === 'wall') drawItem(g, it);
-    for (const it of game.items) if (kindOf(it) === 'flat') drawItem(g, it);
+    // 壁掛け → 敷物 → 選んだ印 → 床の家具の影
+    for (const it of game.items) if (kindOf(it) === 'wall') drawArt(g, it);
+    for (const it of game.items) if (kindOf(it) === 'flat') drawArt(g, it);
     drawMarker(g);
+    for (const it of game.items) if (kindOf(it) === 'floor') { const [w, d] = footprint(it); floorShadow(g, it.gx, it.gz, w, d); }
+}
+let renderCount = 0; // 描き直した回数（テストで、止まっている間に描き直していないか確かめる）
+function render() {
+    const g = ctx;
+    renderCount++;
+    renderBackground();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, canvas.width, canvas.height);
+    g.drawImage(bgCanvas, 0, 0);
+    worldTransform(g);
+    g.imageSmoothingQuality = 'high';
     drawList = buildDrawList();
     for (const o of drawList) {
         if (o.resident) drawResident(g);
@@ -674,7 +798,7 @@ const DOUBLE_TAP_MS = 350;
 let lastTap = null;
 function hitItem(item, x, y) {
     if (kindOf(item) === 'flat') { const [w, d] = footprint(item), [a, b] = unP(x, y); return a >= item.gx && a <= item.gx + w && b >= item.gz && b <= item.gz + d; }
-    return hitRect(artRect(item), x, y);
+    return hitMatrix(artMatrix(item), x, y);
 }
 // 押した所にある家具（手前から。壁掛け・敷物は最後）。その時の並びで調べる（置いた直後で、まだ描いていなくても当たるように）
 function pickItem(clientX, clientY) {
@@ -696,7 +820,8 @@ function pickItem(clientX, clientY) {
 function residentHit(clientX, clientY) {
     if (!resident.visible) return false;
     const [x, y] = toWorld(clientX, clientY);
-    if (!hitRect(residentRect(), x, y)) return false;
+    const rr = residentRect();
+    if (!rr.im || !hitMatrix(rectMatrix(rr), x, y)) return false;
     const list = buildDrawList(), ri = list.findIndex(o => o.resident);
     for (let i = list.length - 1; i > ri; i--) if (hitItem(list[i].item, x, y)) return false;
     return true;
@@ -864,14 +989,17 @@ const TINT_PRESETS = [
     ['青み', { h: 180, s: 100, l: 100 }], ['紫み', { h: -90, s: 100, l: 100 }], ['明るく', { h: 0, s: 90, l: 125 }],
     ['暗く', { h: 0, s: 100, l: 72 }], ['くすみ', { h: 0, s: 45, l: 100 }], ['モノクロ', { h: 0, s: 0, l: 100 }],
 ];
-let tintUid = null, tintBefore = null;
-function curTint(it) { return it.tint || TINT_DEFAULT; }
+let tintUid = null, tintBefore = null, tintPart = 'all';
+// いま選んでいる部分（all は全部）の色合い
+function curTint(it) { return (tintPart === 'all' ? it.tint?.all : tintFor(it.tint, tintPart)) || TINT_DEFAULT; }
 function openTint(uid) {
     const it = findItem(uid);
     if (!it) return;
     tintUid = uid;
+    tintPart = 'all';
     tintBefore = JSON.stringify(it.tint || null);
     document.getElementById('tint-name').textContent = FURNITURE[it.type].name;
+    renderTintParts(it);
     renderTintPresets(it);
     syncTintInputs(it);
     tintDialog.showModal();
@@ -895,18 +1023,71 @@ function restoreView() {
     viewBeforeSheet = null;
     requestRender();
 }
+// 部分を選ぶボタン（全部・部分ごと）。色の点は、いまの色合いを当てた代表の色
+function renderTintParts(it) {
+    const wrap = document.getElementById('tint-parts');
+    wrap.innerHTML = '';
+    const parts = partsOf(FURNITURE[it.type].art);
+    wrap.hidden = parts.length < 2;
+    const add = (key, label, color) => {
+        const b = document.createElement('button');
+        b.className = 'tint-part';
+        b.dataset.part = key;
+        b.setAttribute('aria-pressed', String(key === tintPart));
+        b.innerHTML = color ? '<span class="dot"></span>' : '';
+        if (color) b.querySelector('.dot').style.background = color;
+        b.append(label);
+        b.addEventListener('click', () => {
+            tintPart = key;
+            wrap.querySelectorAll('.tint-part').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+            renderTintPresets(it);
+            syncTintInputs(it);
+        });
+        wrap.appendChild(b);
+    };
+    add('all', 'ぜんぶ', null);
+    parts.forEach((p, i) => add(String(i + 1), p.name, tintedColor(p.color, tintFor(it.tint, i + 1))));
+}
+// 代表の色に色合いを当てた色（部分のボタンの点に使う）
+function tintedColor(hex, t) {
+    if (!t) return hex;
+    const n = parseInt(hex.slice(1), 16);
+    let [h, s, l] = rgbToHsl((n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
+    h = (h + t.h / 360 + 1) % 1; s = Math.min(1, s * t.s / 100);
+    const kl = t.l / 100; l = kl <= 1 ? l * kl : l + (1 - l) * (kl - 1) * 0.8;
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s, pp = 2 * l - q;
+    const c = s === 0 ? [l, l, l] : [hue2rgb(pp, q, h + 1 / 3), hue2rgb(pp, q, h), hue2rgb(pp, q, h - 1 / 3)];
+    return '#' + c.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+}
 function syncTintInputs(it) {
     const t = curTint(it);
     for (const k of ['h', 's', 'l']) {
         tintInputs[k].value = t[k];
         document.getElementById(`tint-${k}-val`).textContent = k === 'h' ? `${t[k] > 0 ? '+' : ''}${t[k]}°` : `${t[k]}%`;
     }
+    const cur = JSON.stringify(tintPart === 'all' ? it.tint?.all || null : it.tint?.[tintPart] || null);
     document.querySelectorAll('#tint-presets button').forEach((b, i) => {
-        const p = TINT_PRESETS[i][1];
-        b.setAttribute('aria-pressed', String(JSON.stringify(sanitizeTint(p)) === JSON.stringify(it.tint || null)));
+        b.setAttribute('aria-pressed', String(JSON.stringify(sanitizeOne(TINT_PRESETS[i][1])) === cur));
+    });
+    // 部分のボタンの色の点も、いまの色合いに合わせる
+    const parts = partsOf(FURNITURE[it.type].art);
+    document.querySelectorAll('#tint-parts .tint-part').forEach(b => {
+        const n = Number(b.dataset.part);
+        if (n) b.querySelector('.dot').style.background = tintedColor(parts[n - 1].color, tintFor(it.tint, n));
     });
 }
-// 見本: その家具に色合いを当てた小さな絵
+// 選んでいる部分の色合いを t にした、家具全体の色合い
+function withPart(it, t) {
+    const out = { ...(it.tint || {}) };
+    if (tintPart === 'all') {
+        // 全部を変えるときは、部分ごとの色合いを消して、全部そろえる
+        for (const k of Object.keys(out)) delete out[k];
+        if (t) out.all = t;
+    } else if (t) out[tintPart] = t;
+    else delete out[tintPart];
+    return sanitizeTint(out);
+}
+// 見本: その家具（選んだ部分）に色合いを当てた小さな絵
 function renderTintPresets(it) {
     const wrap = document.getElementById('tint-presets');
     wrap.innerHTML = '';
@@ -916,13 +1097,13 @@ function renderTintPresets(it) {
         b.className = 'tint-preset';
         const c = document.createElement('canvas');
         c.width = 96; c.height = 72;
-        const src = tintedSource(def.art, sanitizeTint(tint));
+        const src = tintedSource(def.art, withPart(it, sanitizeOne(tint)));
         if (im && src) {
             const k = Math.min(c.width / im.w, c.height / im.h);
             c.getContext('2d').drawImage(src, (c.width - im.w * k) / 2, (c.height - im.h * k) / 2, im.w * k, im.h * k);
         }
         b.append(c, name);
-        b.addEventListener('click', () => { setTint(sanitizeTint(tint)); saveGame(); });
+        b.addEventListener('click', () => { setTint(withPart(it, sanitizeOne(tint))); saveGame(); });
         wrap.appendChild(b);
     }
 }
@@ -937,12 +1118,12 @@ for (const k of ['h', 's', 'l']) {
     tintInputs[k].addEventListener('input', () => {
         const it = findItem(tintUid);
         if (!it) return;
-        setTint(sanitizeTint({ ...curTint(it), [k]: Number(tintInputs[k].value) }));
+        setTint(withPart(it, sanitizeOne({ ...curTint(it), [k]: Number(tintInputs[k].value) })));
     });
-    tintInputs[k].addEventListener('change', () => saveGame());
+    tintInputs[k].addEventListener('change', () => { const it = findItem(tintUid); if (it) renderTintPresets(it); saveGame(); });
 }
-document.getElementById('tint-reset').addEventListener('click', () => { setTint(null); saveGame(); });
-document.getElementById('tint-revert').addEventListener('click', () => { setTint(JSON.parse(tintBefore)); saveGame(); });
+document.getElementById('tint-reset').addEventListener('click', () => { const it = findItem(tintUid); if (it) setTint(withPart(it, null)); saveGame(); });
+document.getElementById('tint-revert').addEventListener('click', () => { setTint(sanitizeTint(JSON.parse(tintBefore))); saveGame(); });
 document.getElementById('tint-close').addEventListener('click', () => tintDialog.close());
 tintDialog.addEventListener('click', (e) => { if (e.target === tintDialog) tintDialog.close(); });
 tintDialog.addEventListener('close', () => { tintUid = null; restoreView(); saveGame(); });
@@ -950,7 +1131,8 @@ tintDialog.addEventListener('close', () => { tintUid = null; restoreView(); save
 // ---------- 住人 ----------
 // 部屋を歩き回り、家具を使う。位置は保存しない（開くたびに部屋の真ん中近くから始まる）
 const RES = {
-    speed: 1.7,     // 歩く速さ（マス/秒）
+    speed: 1.6,     // 歩く速さ（マス/秒）
+    stride: 0.42,   // 一歩の長さ（マス）
     radius: 0.3,    // 家具とぶつからないための体の半径（マス）
     nav: 0.5,       // 道を探すマス目の大きさ（マス）
     height: 1.25,   // 立ったときの絵の高さ（m）
@@ -962,7 +1144,7 @@ const resident = {
     x: 5, z: 5, dirX: 0, dirZ: 1,      // 位置と向き（マス）
     mode: 'idle',                       // idle 立ち止まる / walk 歩く / use 家具を使う
     path: [], plan: null, use: null,
-    timer: 2, t: 0, hop: 0, step: 0, pose: null, poseUntil: 0,
+    timer: 2, t: 0, hop: 0, step: 0, pose: null, poseUntil: 0, // step: 歩いた歩数（1 歩で 1 増える）
     visible: false, frozen: false, last: 0, lastDraw: 0, recentUid: null,
     bubbleText: '', bubbleUntil: 0,
 };
@@ -975,7 +1157,9 @@ function residentFrame() {
     if (seated()) return { n: RESIDENT_FRAMES[r.use.plan.act], flip: r.use.plan.flip };
     const { sx, sy } = screenDir();
     if (sy < -0.01) return { n: RESIDENT_FRAMES.back, flip: sx < 0 };
-    const n = r.mode === 'walk' ? (Math.floor(r.step * 2) % 2 ? RESIDENT_FRAMES.walkA : RESIDENT_FRAMES.walkB) : RESIDENT_FRAMES.stand;
+    // 歩く: 右足 → 立ち → 左足 → 立ち の 4 拍（2 歩で 1 回り）
+    const beat = Math.floor(r.step * 2) % 4;
+    const n = r.mode === 'walk' ? [RESIDENT_FRAMES.walkA, RESIDENT_FRAMES.stand, RESIDENT_FRAMES.walkB, RESIDENT_FRAMES.stand][beat] : RESIDENT_FRAMES.stand;
     return { n, flip: sx > 0 };
 }
 // 住人の絵を置く四角（部屋の座標）。足元の点に下端中央を合わせる
@@ -985,9 +1169,10 @@ function residentRect() {
     const [sx, sy] = P(a.x, a.z, a.lift);
     // 絵の高さはどれも同じ（足元をそろえて切り出している）
     const h = RES.height * PX_PER_M, w = im ? h * im.w / im.h : h * 0.8;
-    const bob = r.mode === 'walk' ? Math.abs(Math.sin(r.step * Math.PI)) * 2 : 0;
+    // 一歩ごとに体が上下する（足が床に着く瞬間がいちばん低い）
+    const bob = r.mode === 'walk' ? Math.abs(Math.sin(r.step * Math.PI)) * 3.5 : 0;
     const hop = Math.sin(r.hop * Math.PI) * 10;
-    return { x: sx - w / 2, y: sy - h + 3 - bob - hop, w, h, flip: f.flip, im };
+    return { x: sx - w / 2, y: sy - h + 3 - bob - hop, w, h, flip: f.flip, im, footX: sx, footY: sy };
 }
 function drawResident(g) {
     const r = resident;
@@ -996,7 +1181,14 @@ function drawResident(g) {
         g.fillStyle = 'rgba(58, 42, 64, 0.22)';
         g.beginPath(); g.ellipse(x, y, 16, 6, 0, 0, Math.PI * 2); g.fill();
     }
-    drawImageRect(g, residentRect());
+    const rr = residentRect();
+    if (!rr.im) return;
+    // 歩くときは、一歩ごとに体を左右へ少し傾ける（後ろ姿は 1 枚しかないので、少し大きめに）
+    const sway = r.mode === 'walk' ? Math.sin(r.step * Math.PI) * (residentFrame().n === RESIDENT_FRAMES.back ? 0.06 : 0.035) : 0;
+    g.save();
+    g.translate(rr.footX, rr.footY); g.rotate(sway); g.translate(-rr.footX, -rr.footY);
+    drawMatrix(g, rectMatrix(rr).m, rr.im.img, rr.im.w);
+    g.restore();
 }
 
 // ---- 歩ける場所（0.5 マスごと） ----
@@ -1191,8 +1383,9 @@ function updateResident(dt) {
         if (!wp) { arrive(); return; }
         const dx = wp.x - r.x, dz = wp.z - r.z, d = Math.hypot(dx, dz);
         if (d > 1e-3) { r.dirX = dx / d; r.dirZ = dz / d; }
-        const step = RES.speed * dt;
-        r.step += dt * 2.2;
+        // 踏み出すときに速く、足が着くときにゆっくり（すべって見えないように）
+        const step = RES.speed * dt * (0.7 + 0.6 * Math.sin(r.step * Math.PI) ** 2);
+        r.step += step / RES.stride;
         if (d <= step) { r.x = wp.x; r.z = wp.z; r.path.shift(); if (!r.path.length) arrive(); }
         else { r.x += dx / d * step; r.z += dz / d * step; }
     } else if (r.mode === 'use') {
@@ -1257,8 +1450,14 @@ function residentTick(now) {
     const dt = Math.min(0.1, (now - (r.last || now)) / 1000);
     r.last = now; r.lastDraw = now;
     if (!r.frozen) updateResident(dt);
+    // 住人の見た目が前と同じ（立ち止まっているなど）なら、描き直さない
+    const rr = residentRect(), f = residentFrame();
+    const sig = [rr.x, rr.y, f.n, f.flip, r.step.toFixed(2), r.mode === 'walk', bubble.hidden ? '' : r.bubbleText, r.t < r.bubbleUntil].join('|');
+    if (sig === lastResidentSig && !renderQueued) return;
+    lastResidentSig = sig;
     render();
 }
+let lastResidentSig = '';
 function setResidentShown(on) {
     const r = resident;
     r.visible = on;
@@ -1473,7 +1672,7 @@ window.__lifemaker = {
     APP_VERSION, FURNITURE, ready, game: () => game, selected: () => selectedUid, view,
     addItem, select, rotateSelected, removeSelected, isBlocked, footprint, supportOf: (uid) => supportOf(findItem(uid))?.uid ?? null,
     undo, redo, savePreset, loadPreset, zoomAt, openTint, kindOf,
-    history: () => ({ undo: undoStack.length, redo: redoStack.length }), save: saveGame, render,
+    history: () => ({ undo: undoStack.length, redo: redoStack.length }), save: saveGame, render, renders: () => renderCount,
     drawOrder: () => drawList.map(o => o.resident ? 'resident' : o.item.uid),
     // 家具の絵の真ん中（h は絵の高さの割合。0 が上、1 が下）が画面のどこに映るか（クライアント座標）
     screenOf(uid, h = 0.6) {

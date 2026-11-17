@@ -20,7 +20,7 @@
 <meta property="og:image:height" content="512">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="css/style.css?v=0.9.0">
+<link rel="stylesheet" href="css/style.css?v=0.10.0">
 </head>
 <body>
 <div id="app">
@@ -78,6 +78,7 @@
 
 <dialog id="tint-dialog" class="sheet">
     <h2><span id="tint-name"></span>の色合い</h2>
+    <div id="tint-parts" class="tint-parts" role="group" aria-label="色を変える部分"></div>
     <div id="tint-presets" class="tint-presets" role="group" aria-label="よく使う色合い"></div>
     <div class="tint-row"><label for="tint-h">色合い</label><output id="tint-h-val"></output><input id="tint-h" type="range" min="-180" max="180" step="1" class="tint-hue"></div>
     <div class="tint-row"><label for="tint-s">鮮やかさ</label><output id="tint-s-val"></output><input id="tint-s" type="range" min="0" max="200" step="1"></div>
@@ -101,6 +102,6 @@
 
 <div id="toast" role="status"></div>
 
-<script type="module" src="js/app.js?v=0.9.0"></script>
+<script type="module" src="js/app.js?v=0.10.0"></script>
 </body>
 </html>
