@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<script>try { const a = JSON.parse(localStorage.getItem('lifemaker_save') || '{}').appearance; if (a === 'light' || a === 'dark') document.documentElement.dataset.theme = a; } catch (e) { }</script>
+<script>try { const a = JSON.parse(localStorage.getItem('lifemaker2d_save') || '{}').appearance; if (a === 'light' || a === 'dark') document.documentElement.dataset.theme = a; } catch (e) { }</script>
 <title>LifeMaker</title>
-<meta name="description" content="スマホで遊ぶ3Dの模様替えゲーム。家具を自由に置いて部屋を作ろう。">
+<meta name="description" content="スマホで遊ぶ模様替えゲーム。家具を置いて部屋を作り、住人との暮らしを楽しもう。">
 <meta name="theme-color" content="#f3efe8">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -13,14 +13,14 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="LifeMaker">
 <meta property="og:title" content="LifeMaker">
-<meta property="og:description" content="スマホで遊ぶ3Dの模様替えゲーム。家具を自由に置いて部屋を作ろう。">
+<meta property="og:description" content="スマホで遊ぶ模様替えゲーム。家具を置いて部屋を作り、住人との暮らしを楽しもう。">
 <meta property="og:url" content="https://arata-a3.github.io/LifeMaker/">
 <meta property="og:image" content="https://arata-a3.github.io/LifeMaker/og-image.png">
 <meta property="og:image:width" content="512">
 <meta property="og:image:height" content="512">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="css/style.css?v=0.7.0">
+<link rel="stylesheet" href="css/style.css?v=0.8.0">
 </head>
 <body>
 <div id="app">
@@ -39,31 +39,18 @@
             <div id="history">
                 <button id="undo-btn" class="round-btn" aria-label="元に戻す" title="元に戻す (Ctrl+Z)" disabled>↶</button>
                 <button id="redo-btn" class="round-btn" aria-label="やり直す" title="やり直す (Ctrl+Y)" disabled>↷</button>
-                <button id="snap-btn" class="snap-btn" aria-pressed="false">▦ マス目</button>
             </div>
-            <div id="hint">家具を選んで置こう。ダブルタップで回転、ドラッグで部屋を回せます</div>
+            <div id="hint">家具を選んで置こう。ドラッグで動かす、ダブルタップで向きを変える</div>
             <div id="toolbar" hidden>
                 <span id="sel-name"></span>
-                <button id="rotate-btn">↻ 回転</button>
-                <button id="color-btn">🎨 色</button>
+                <button id="rotate-btn">⇆ 向き</button>
                 <button id="remove-btn">しまう</button>
                 <button id="done-btn">完了</button>
             </div>
         </div>
 
-        <section id="catalog" aria-label="家具と床・壁">
-            <div id="tabs" role="tablist">
-                <button class="tab" role="tab" data-tab="furniture" aria-selected="true">🛋 家具</button>
-                <button class="tab" role="tab" data-tab="surface" aria-selected="false">🧱 床・壁</button>
-            </div>
-            <div id="furniture-panel">
-                <div id="filters">
-                    <input id="search" type="search" placeholder="🔍 さがす" aria-label="家具を名前やタグで探す" autocomplete="off">
-                    <div id="tags" role="group" aria-label="タグで絞り込む"></div>
-                </div>
-                <div id="items"></div>
-            </div>
-            <div id="surface-panel" hidden></div>
+        <section id="catalog" aria-label="家具">
+            <div id="items"></div>
         </section>
     </main>
 
@@ -73,33 +60,19 @@
 <dialog id="menu">
     <h2>設定</h2>
     <fieldset>
+        <legend>住人</legend>
+        <label class="field">名前 <input id="resident-name" type="text" maxlength="12" autocomplete="off"></label>
+        <label class="check"><input type="checkbox" id="resident-toggle"> 住人を出す</label>
+    </fieldset>
+    <fieldset>
         <legend>明るさ</legend>
         <label><input type="radio" name="appearance" value="auto"> 端末に合わせる</label>
         <label><input type="radio" name="appearance" value="light"> ライト</label>
         <label><input type="radio" name="appearance" value="dark"> ダーク</label>
     </fieldset>
-    <label class="check"><input type="checkbox" id="resident-toggle"> 住人を出す</label>
     <button id="clear-room-btn">部屋を空にする</button>
     <button id="reset-btn" class="danger">全てのデータを消す</button>
     <button id="menu-close" class="primary">閉じる</button>
-</dialog>
-
-<dialog id="color-dialog" class="sheet">
-    <div class="cd-head">
-        <span class="cd-preview"></span>
-        <div><div class="cd-title"></div><div class="cd-hex"></div></div>
-    </div>
-    <div class="cd-parts" role="group" aria-label="色を変える部分"></div>
-    <section class="cd-recent-sec"><h3>最近使った色</h3><div class="cd-recent swatches"></div></section>
-    <section class="cd-same-sec"><h3>ほかの家具と同じ色</h3><div class="cd-same"></div></section>
-    <section><h3>色の候補</h3><div class="cd-palette swatches"></div></section>
-    <section><h3>微調整</h3><div class="cd-sliders"></div></section>
-    <section class="cd-eyedrop-sec" hidden><button class="cd-eyedrop wide">スポイトで画面から色を取る</button></section>
-    <div class="cd-actions">
-        <button class="cd-revert">開いたときの色に戻す</button>
-        <button class="cd-auto">元の色に戻す</button>
-        <button class="cd-close primary">閉じる</button>
-    </div>
 </dialog>
 
 <dialog id="preset-dialog" class="sheet">
@@ -114,6 +87,6 @@
 
 <div id="toast" role="status"></div>
 
-<script type="module" src="js/app.js?v=0.7.0"></script>
+<script type="module" src="js/app.js?v=0.8.0"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 """art/source の画像から背景のマゼンタを抜き、絵の部分だけを切り出して art/sprites に PNG で保存する。
 
 使い方: python tools/cut_sprites.py
+ゲームで使う軽い版（WebP）も img/ に書き出す（家具は長い辺 600px まで、住人は高さ 300px）。
 - 家具: 1 枚に 1 つ。いちばん大きなまとまりの周りで切り抜く。
 - 住人（resident.*）: 4 列 × 2 行の一覧表。1 人ずつ切り出し、resident_1.png 〜 resident_8.png にする。
   足元をそろえるため、同じ大きさのキャンバスに「下端中央」をそろえて置く。
@@ -14,6 +15,9 @@ from scipy import ndimage
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / 'art' / 'source'
 OUT = ROOT / 'art' / 'sprites'
+GAME = ROOT / 'img'
+GAME_MAX = 600       # 家具の長い辺（px）
+GAME_RESIDENT_H = 300  # 住人の高さ（px）
 # マゼンタらしさ（R と B の小さい方 − G）。これより大きいと背景、小さいと絵
 KEY_HI, KEY_LO = 150, 70
 RESIDENT_GRID = (4, 2)
@@ -76,11 +80,14 @@ def cut_resident(path: Path):
         canvas = Image.new('RGBA', (W, H))
         canvas.paste(c, ((W - c.width) // 2, H - c.height - 4), c)
         canvas.save(OUT / f'resident_{i}.png')
+        k = GAME_RESIDENT_H / H
+        canvas.resize((round(W * k), GAME_RESIDENT_H), Image.LANCZOS).save(GAME / f'resident_{i}.webp', quality=90)
     print(f'resident: {len(cells)} pieces ({W}x{H})')
 
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
+    GAME.mkdir(parents=True, exist_ok=True)
     for path in sorted(SRC.iterdir()):
         if path.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp'):
             continue
@@ -89,6 +96,8 @@ def main():
             continue
         img = crop(key_out(Image.open(path)))
         img.save(OUT / f'{path.stem}.png')
+        k = min(1, GAME_MAX / max(img.size))
+        img.resize((round(img.width * k), round(img.height * k)), Image.LANCZOS).save(GAME / f'{path.stem}.webp', quality=90)
         print(f'{path.stem}: {img.width}x{img.height}')
 
 

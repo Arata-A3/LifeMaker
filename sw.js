@@ -1,15 +1,17 @@
 // ネットワーク優先。オフラインのときだけ保存分を返す。
-const CACHE = 'lifemaker-v1';
+const CACHE = 'lifemaker2d-v1';
 const CORE = [
     './',
     'index.html',
     'css/style.css',
     'js/app.js',
-    'lib/three.module.min.js',
     'manifest.webmanifest',
     'icon.svg',
     'icon-192.png',
     'icon-512.png',
+    'img/bed.webp',
+    'img/sofa.webp',
+    ...[1, 2, 3, 4, 5, 6, 7, 8].map(n => `img/resident_${n}.webp`),
 ];
 
 self.addEventListener('install', (e) => {

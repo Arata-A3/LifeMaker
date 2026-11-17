@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SHOT_DIR = process.argv[2];
 const CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json', '.json': 'application/json' };
+const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.webmanifest': 'application/manifest+json', '.json': 'application/json' };
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ---------- 配信 ----------
@@ -66,7 +66,8 @@ async function open(path = '', { width = 390, height = 844, mobile = true, resid
         await sleep(100);
         try { if (await evaluate('!!window.__lifemaker')) break; } catch { }
     }
-    await sleep(200);
+    await evaluate('window.__lifemaker.ready');
+    await sleep(100);
     // 住人は歩き回ってほかのテストの指の操作に当たるので、ふだんは止めて隠す
     if (!resident) await evaluate('window.__lifemaker.resident.freeze(true)');
 }
@@ -75,7 +76,7 @@ async function clearSave() {
     await sleep(200);
     await send('Page.navigate', { url: BASE + 'tests/blank.html' });
     await sleep(200);
-    await evaluate(`localStorage.removeItem('lifemaker_save'); localStorage.removeItem('lifemaker_save_corrupted')`);
+    await evaluate(`localStorage.removeItem('lifemaker2d_save'); localStorage.removeItem('lifemaker2d_save_corrupted')`);
 }
 async function mouse(type, x, y, buttons = 1) {
     await send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
@@ -105,517 +106,164 @@ const L = (expr) => evaluate(`(() => { const L = window.__lifemaker; return ${ex
 
 await clearSave();
 await open();
+const item = (uid) => L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
+async function tapAt(p) { await mouse('mousePressed', p.x, p.y); await mouse('mouseReleased', p.x, p.y, 0); await sleep(30); }
 
-await test('起動して版と一覧が出る', async () => {
+await test('起動して版・一覧・最初の部屋が出る', async () => {
     const v = await L('L.APP_VERSION');
     assert(await evaluate(`document.getElementById('version').textContent`) === 'v' + v, '版の表示が違う');
     const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
     const qs = [...html.matchAll(/\?v=([\d.]+)/g)].map(m => m[1]);
     assert(qs.length >= 2 && qs.every(q => q === v), `?v= が APP_VERSION とそろっていない: ${qs} / ${v}`);
-    const n = await evaluate(`document.querySelectorAll('#items .item').length`);
-    assert(n === await L('Object.keys(L.FURNITURE).length'), '家具の一覧の数が違う');
-    assert(await L('L.game().items.length') === 4, '最初の家具が 4 つない');
+    assert(await evaluate(`document.querySelectorAll('#items .item').length`) === await L('Object.keys(L.FURNITURE).length'), '家具の一覧の数が違う');
+    assert(await L('L.game().items.length') === 5, '最初の家具が 5 つない');
+    assert(await L('L.game().items.every(it => !L.isBlocked(it))'), '最初の家具が重なっている');
+    const broken = await evaluate(`[...document.querySelectorAll('#items img')].filter(i => !i.complete || !i.naturalWidth).length`);
+    assert(broken === 0, '一覧の絵が読めていない');
 });
-
-await shot('01_phone_portrait');
+await shot('01_phone');
 
 await test('家具を一覧から置ける（空いている場所に置かれ、選ばれる）', async () => {
-    await evaluate(`document.querySelector('#items .item[data-type="chair"]').click()`);
+    await evaluate(`document.querySelector('#items .item[data-type="plant"]').click()`);
     const r = await L(`(() => { const g = L.game(); const it = g.items[g.items.length - 1]; return { n: g.items.length, type: it.type, sel: L.selected() === it.uid, blocked: L.isBlocked(it), bar: !document.getElementById('toolbar').hidden }; })()`);
-    assert(r.n === 5 && r.type === 'chair', '置かれていない');
+    assert(r.n === 6 && r.type === 'plant', '置かれていない');
     assert(r.sel && r.bar, '置いた家具が選ばれていない');
     assert(!r.blocked, 'ほかの家具と重なる場所に置かれた');
 });
-await shot('02_selected');
 
-await test('家具をドラッグで動かせる', async () => {
-    const uid = await L(`L.selected()`);
-    const before = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
-    const p = await L(`L.screenOf(${uid})`);
-    await dragMouse(p, { x: p.x + 70, y: p.y + 40 });
-    const after = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
+await test('家具をドラッグで動かせて、保存される', async () => {
+    const uid = await L('L.selected()');
+    const before = await item(uid);
+    const p = await L(`L.screenOf(${uid}, 0.6)`);
+    assert(await L(`L.pickAt(${p.x}, ${p.y})`) === uid, '家具を押しても選べない');
+    await dragMouse(p, { x: p.x + 40, y: p.y + 25 });
+    const after = await item(uid);
     assert(after.gx !== before.gx || after.gz !== before.gz, '位置が変わらない');
-    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save')).items.find(i => i.uid === ${uid})`);
+    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker2d_save')).items.find(i => i.uid === ${uid})`);
     assert(saved && saved.gx === after.gx && saved.gz === after.gz, '動かした位置が保存されていない');
 });
 
-await test('回転すると向きが変わり、部屋からはみ出さない', async () => {
-    await evaluate(`document.querySelector('#items .item[data-type="sofa"]').click()`);
-    for (let i = 0; i < 4; i++) {
-        await evaluate(`document.getElementById('rotate-btn').click()`);
-        const r = await L(`(() => { const it = L.game().items.find(i => i.uid === L.selected()); const [w, d] = L.footprint(it); return { rot: it.rot, ok: it.gx >= 0 && it.gz >= 0 && it.gx + w <= 12 && it.gz + d <= 12 }; })()`);
-        assert(r.rot === (i + 1) % 4, '向きが変わらない');
-        assert(r.ok, 'はみ出した');
-    }
+await test('絵の透明な所を押しても家具は選ばれない', async () => {
+    await L('L.select(null)');
+    const p = await L(`L.screenOf(2, 0.3)`);
+    // ベッド（uid 2）の絵の四角の左上の角あたりは透明
+    const corner = await L(`(() => { const s = L.screenOf(2, 1.2); return { x: s.x - 45, y: s.y - 15 }; })()`);
+    assert(await L(`L.pickAt(${p.x}, ${p.y})`) === 2, 'ベッドの真ん中で選べない');
+    assert(await L(`L.pickAt(${corner.x}, ${corner.y})`) !== 2, '透明な所でベッドが選ばれた');
 });
 
-await test('何もない所をドラッグすると部屋が回り、タップで選択が外れる', async () => {
-    const a0 = await L('L.cam.azimuth');
-    const empty = { x: 30, y: 120 };
-    await dragMouse(empty, { x: 130, y: 120 });
-    const a1 = await L('L.cam.azimuth');
-    assert(Math.abs(a1 - a0) > 0.3, '回らない');
-    assert(await L('L.selected()') !== null, 'ドラッグで選択が外れてしまった');
-    await mouse('mousePressed', 30, 120); await mouse('mouseReleased', 30, 120, 0);
-    await sleep(50);
-    assert(await L('L.selected()') === null, 'タップで選択が外れない');
+await test('向きを変えると左右が入れ替わり、部屋からはみ出さない', async () => {
+    await L('L.select(4)');
+    const before = await item(4);
+    await evaluate(`document.getElementById('rotate-btn').click()`);
+    const after = await item(4);
+    const fp = await L(`L.footprint(L.game().items.find(i => i.uid === 4))`);
+    assert(after.rot !== before.rot, '向きが変わらない');
+    assert(after.gx >= 0 && after.gz >= 0 && after.gx + fp[0] <= 10 && after.gz + fp[1] <= 10, `はみ出した: ${JSON.stringify(after)}`);
+    await evaluate(`document.getElementById('rotate-btn').click()`);
 });
-await shot('03_rotated_view');
 
-async function tapAt(p) { await mouse('mousePressed', p.x, p.y); await mouse('mouseReleased', p.x, p.y, 0); }
-
-await test('家具をダブルタップすると回る（1 回だけなら回らない）', async () => {
-    await evaluate(`document.querySelector('#items .item[data-type="table"]').click()`);
-    const uid = await L('L.selected()');
-    const rot0 = await L(`L.game().items.find(i => i.uid === ${uid}).rot`);
-    const p = await L(`L.screenOf(${uid}, 0.7)`); // 天板の高さを押す
+await test('家具をダブルタップすると向きが変わる（1 回だけなら変わらない）', async () => {
+    await L('L.select(null)');
+    const p = await L(`L.screenOf(2, 0.4)`);
+    const r0 = (await item(2)).rot;
     await tapAt(p);
-    await sleep(500); // 間を空けた 2 回目は回らない
-    await tapAt(p);
-    assert(await L(`L.game().items.find(i => i.uid === ${uid}).rot`) === rot0, '1 回のタップで回ってしまった');
+    assert((await item(2)).rot === r0, '1 回のタップで変わった');
     await sleep(500);
-    await tapAt(p);
-    await sleep(80);
-    await tapAt(p);
-    assert(await L(`L.game().items.find(i => i.uid === ${uid}).rot`) === (rot0 + 1) % 4, 'ダブルタップで回らない');
-    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save')).items.find(i => i.uid === ${uid}).rot`);
-    assert(saved === (rot0 + 1) % 4, '回した向きが保存されていない');
+    await tapAt(p); await tapAt(p);
+    assert((await item(2)).rot !== r0, 'ダブルタップで変わらない');
+    await L('L.undo()');
 });
 
-await test('色を変えて保存し、元の色に戻せる', async () => {
-    const uid = await L('L.selected()');
-    await evaluate(`document.getElementById('color-btn').click()`);
-    assert(await evaluate(`document.getElementById('color-dialog').open`), '色の画面が開かない');
-    assert(await evaluate(`document.querySelector('#color-dialog .cd-recent-sec').hidden`), '最近使った色が空なのに見出しが出ている');
-    assert(!(await evaluate(`document.querySelector('#color-dialog .cd-eyedrop-sec').hidden`)), 'Chrome なのにスポイトが出ていない');
-    assert(!(await evaluate(`!!document.querySelector('#color-dialog input[type="color"]')`)), '「ほかの色」が残っている');
-    await evaluate(`document.querySelectorAll('#color-dialog .cd-palette .cswatch')[15].click()`);
-    const c1 = await L(`L.game().items.find(i => i.uid === ${uid}).colors.main ?? null`);
-    assert(c1 === '#4a7cc4', `色が変わらない: ${c1}`);
-    assert(await evaluate(`document.querySelectorAll('#color-dialog .cswatch[aria-pressed="true"]').length`) >= 1, '選んだ色に印がない');
-    // 微調整: 明るさを＋1
-    const before = await L(`L.hslOf('#4a7cc4')`);
-    await evaluate(`(() => { const b = document.querySelector('#color-dialog .cd-row[data-key="l"] .cd-step[data-d="1"]'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', button: 0 })); b.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerType: 'mouse' })); })()`);
-    const c2 = await L(`L.game().items.find(i => i.uid === ${uid}).colors.main ?? null`);
-    assert(c2 === await L(`L.hslToHex(${before[0]}, ${before[1]}, ${before[2] + 1})`), `明るさの＋が効かない: ${c2}`);
-    assert(JSON.stringify(await L(`L.hslOf('${c2}')`)) === JSON.stringify([before[0], before[1], before[2] + 1]), '開き直したときの数値がずれる');
-    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
-    await sleep(300); // close イベントは少し遅れて届く
-    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save'))`);
-    assert(saved.items.find(i => i.uid === uid).colors.main === c2, '色が保存されていない');
-    assert(saved.recentColors[0] === c2 && saved.recentColors.length === 1, `最近使った色に 1 回だけ入っていない: ${JSON.stringify(saved.recentColors)} / ${c2}`);
-    await evaluate(`document.getElementById('color-btn').click()`);
-    await evaluate(`document.querySelector('#color-dialog .cd-auto').click()`);
-    assert(await L(`L.game().items.find(i => i.uid === ${uid}).colors.main ?? null`) === null, '元の色に戻らない');
-    assert(await evaluate(`document.querySelector('#color-dialog .cd-auto').disabled`), '元の色なのに「元の色に戻す」が押せる');
-    await evaluate(`document.querySelector('#color-dialog .cd-revert').click()`);
-    assert(await L(`L.game().items.find(i => i.uid === ${uid}).colors.main ?? null`) === c2, '開いたときの色に戻らない');
-    // 部位を切り替えて、脚だけ色を変える
-    const parts = await evaluate(`[...document.querySelectorAll('#color-dialog .cd-part')].map(b => b.textContent)`);
-    assert(JSON.stringify(parts) === JSON.stringify(['天板', '脚']), `部位のタブが違う: ${parts}`);
-    await evaluate(`document.querySelectorAll('#color-dialog .cd-part')[1].click()`);
-    await evaluate(`document.querySelectorAll('#color-dialog .cd-palette .cswatch')[12].click()`);
-    const cs = await L(`L.game().items.find(i => i.uid === ${uid}).colors`);
-    assert(cs.legs === '#d9534f' && cs.main === c2, `部位ごとに色が変わらない: ${JSON.stringify(cs)}`);
-    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
-    await sleep(300);
+await test('何もない所をドラッグで部屋が動き、タップで選択が外れる', async () => {
+    await L('L.select(2)');
+    const before = await L('({ ...L.view })');
+    await dragMouse({ x: 30, y: 140 }, { x: 90, y: 170 });
+    const after = await L('({ ...L.view })');
+    assert(after.cx !== before.cx || after.cy !== before.cy, '部屋が動かない');
+    await tapAt({ x: 30, y: 140 });
+    assert(await L('L.selected()') === null, '選択が外れない');
 });
 
-await test('整数の HSL で作った色は同じ数値に戻る', async () => {
-    const bad = await evaluate(`(() => { const L = window.__lifemaker; const bad = [];
-        for (let i = 0; i < 3000; i++) { const h = Math.floor(Math.random() * 360), s = Math.floor(Math.random() * 101), l = Math.floor(Math.random() * 101);
-            const hex = L.hslToHex(h, s, l); const back = L.hslOf(hex); if (L.hslToHex(...back) !== hex) bad.push([h, s, l, hex, back]); }
-        return bad.slice(0, 3); })()`);
-    assert(bad.length === 0, JSON.stringify(bad));
+await test('拡大縮小には限度がある', async () => {
+    const fit = await L('L.view.fit');
+    await L(`L.zoomAt(200, 300, L.view.fit * 100)`);
+    assert(Math.abs(await L('L.view.scale') - fit * 4) < 1e-6, '拡大の上限がない');
+    await L(`L.zoomAt(200, 300, 0.0001)`);
+    assert(Math.abs(await L('L.view.scale') - fit * 0.8) < 1e-6, '縮小の下限がない');
+    await L(`L.zoomAt(200, 300, L.view.fit)`);
 });
 
-await test('名前・タグで家具を絞り込める', async () => {
-    const count = () => evaluate(`document.querySelectorAll('#items .item').length`);
-    const all = await count();
-    await evaluate(`(() => { const s = document.getElementById('search'); s.value = 'そふぁ'; s.dispatchEvent(new Event('input')); })()`);
-    assert(await count() === 1, 'ひらがなでカタカナの名前が探せない');
-    await evaluate(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
-    await evaluate(`[...document.querySelectorAll('#tags .tag')].find(b => b.textContent === '収納').click()`);
-    const n = await count();
-    assert(n === 6, `収納のタグで 6 つにならない: ${n}`);
-    await evaluate(`(() => { const s = document.getElementById('search'); s.value = 'zzz'; s.dispatchEvent(new Event('input')); })()`);
-    assert(await count() === 0 && await evaluate(`!!document.querySelector('#items .empty')`), '見つからないときの表示がない');
-    await evaluate(`(() => { const s = document.getElementById('search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
-    await evaluate(`[...document.querySelectorAll('#tags .tag')].find(b => b.textContent === 'すべて').click()`);
-    assert(await count() === all, '絞り込みを外しても全部に戻らない');
+await test('奥の家具から順に描く', async () => {
+    await L('L.render()');
+    const order = await L('L.drawOrder()');
+    // 植物（右奥、uid 3）はローテーブル（手前、uid 5）より先
+    assert(order.indexOf(3) < order.indexOf(5), `順番が違う: ${order}`);
 });
 
-await test('部屋をプリセットに保存して呼び出せる', async () => {
-    const room = await L(`JSON.stringify(L.game().items.map(({ uid, ...r }) => r))`);
-    await evaluate(`document.getElementById('preset-btn').click()`);
-    await evaluate(`document.getElementById('preset-name').value = 'テストの部屋'`);
-    await evaluate(`document.getElementById('preset-save').click()`);
-    assert(await evaluate(`document.querySelectorAll('#preset-list .preset').length`) === 1, '一覧に出ない');
-    await evaluate(`document.getElementById('preset-close').click()`);
-    // 部屋を変える
-    await evaluate(`window.confirm = () => true`);
-    await evaluate(`document.getElementById('clear-room-btn').click()`);
-    assert(await L('L.game().items.length') === 0, '部屋が空にならない');
-    await evaluate(`document.getElementById('preset-btn').click()`);
-    await evaluate(`document.querySelector('#preset-list .preset-load').click()`);
-    assert(await L(`JSON.stringify(L.game().items.map(({ uid, ...r }) => r))`) === room, '呼び出した部屋が保存したときと違う');
-    const uids = await L('L.game().items.map(i => i.uid)');
-    assert(new Set(uids).size === uids.length, '家具の番号が重なっている');
-    // 呼び出したあと動かしても、プリセットは変わらない
-    await L(`(() => { const it = L.game().items[0]; it.gx = 0; it.gz = 0; })()`);
-    const ps = await L(`JSON.stringify(L.game().presets[0].items.map(({ uid, ...r }) => r))`);
-    assert(ps === room, 'プリセットが部屋と一緒に変わってしまった');
+await test('重なりの判定（ラグの上は重なりにしない）', async () => {
+    await L('(() => { const it = L.game().items.find(i => i.uid === 5); it.gx = 6; it.gz = 1; })()');
+    assert(await L('L.isBlocked(L.game().items.find(i => i.uid === 5))'), 'ベッドと重なっているのに判定されない');
+    await L('(() => { const it = L.game().items.find(i => i.uid === 5); it.gx = 4; it.gz = 5; })()');
+    assert(!(await L('L.isBlocked(L.game().items.find(i => i.uid === 5))')), 'ラグの上なのに重なり判定された');
 });
 
 await test('元に戻す・やり直す', async () => {
-    await evaluate(`document.querySelector('.tab[data-tab="furniture"]').click()`);
-    await L('L.save()'); // 前のテストが保存せずに変えた分を記録しておく
-    const start = await L('JSON.stringify(L.game().items)');
-    await evaluate(`document.querySelector('#items .item[data-type="plant"]').click()`);
-    const afterAdd = await L('JSON.stringify(L.game().items)');
-    await evaluate(`document.getElementById('rotate-btn').click()`);
-    const afterRot = await L('JSON.stringify(L.game().items)');
+    const n = await L('L.game().items.length');
+    await evaluate(`document.querySelector('#items .item[data-type="sofa"]').click()`);
+    assert(await L('L.game().items.length') === n + 1, '置けない');
     await evaluate(`document.getElementById('undo-btn').click()`);
-    assert(await L('JSON.stringify(L.game().items)') === afterAdd, '1 回戻すと回す前にならない');
-    await evaluate(`document.getElementById('undo-btn').click()`);
-    assert(await L('JSON.stringify(L.game().items)') === start, '2 回戻すと置く前にならない');
-    assert(await L('L.selected()') === null, '消えた家具が選ばれたまま');
+    assert(await L('L.game().items.length') === n, '元に戻らない');
     await evaluate(`document.getElementById('redo-btn').click()`);
-    await evaluate(`document.getElementById('redo-btn').click()`);
-    assert(await L('JSON.stringify(L.game().items)') === afterRot, 'やり直しで戻らない');
-    assert(await evaluate(`document.getElementById('redo-btn').disabled`), 'やり直すものが無いのに押せる');
-    // 戻してから別の操作をすると、やり直しは消える
-    await evaluate(`document.getElementById('undo-btn').click()`);
-    await evaluate(`document.querySelector('#items .item[data-type="lamp"]').click()`);
-    assert(await L('L.history().redo') === 0, '新しい操作のあとにやり直しが残っている');
-    // ドラッグ 1 回は 1 手
-    const uid = await L('L.selected()');
-    const n = await L('L.history().undo');
-    const p = await L(`L.screenOf(${uid}, 1.0)`);
-    await dragMouse(p, { x: p.x + 60, y: p.y + 30 }, 10);
-    assert(await L('L.history().undo') === n + 1, 'ドラッグ 1 回で 1 手になっていない');
-    // 保存した中身も戻っている
-    await evaluate(`document.getElementById('undo-btn').click()`);
-    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save')).items.length`);
-    assert(saved === await L('L.game().items.length'), '戻した結果が保存されていない');
-});
-
-await test('床と壁の柄・色を変えられ、元に戻せる', async () => {
-    await evaluate(`document.querySelector('.tab[data-tab="surface"]').click()`);
-    assert(!(await evaluate(`document.getElementById('surface-panel').hidden`)), '床・壁の画面が出ない');
-    assert(await evaluate(`document.querySelectorAll('#surface-panel .pattern').length`) === 8, '柄の数が違う');
-    await evaluate(`document.querySelector('#surface-panel [data-kind="floor"] .pattern[data-pattern="tatami"]').click()`);
-    await evaluate(`document.querySelector('#surface-panel [data-kind="wall"] .pattern[data-pattern="brick"]').click()`);
-    let g = await L('({ f: L.game().floor, w: L.game().wall })');
-    assert(g.f.pattern === 'tatami' && g.w.pattern === 'brick', '柄が変わらない');
-    await evaluate(`document.querySelector('#surface-panel [data-kind="wall"] .surface-color').click()`);
-    assert(await evaluate(`document.querySelector('#color-dialog .cd-title').textContent`) === '壁の色', '壁の色の画面にならない');
-    await evaluate(`document.querySelectorAll('#color-dialog .cd-palette .cswatch')[9].click()`);
-    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
-    await sleep(300);
-    g = await L('({ f: L.game().floor, w: L.game().wall })');
-    assert(g.w.color === '#bcd7ea', `壁の色が変わらない: ${g.w.color}`);
-    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save'))`);
-    assert(saved.wall.color === '#bcd7ea' && saved.floor.pattern === 'tatami', '床・壁が保存されていない');
-    await evaluate(`document.getElementById('undo-btn').click()`);
-    assert(await L('L.game().wall.color') === null, '壁の色を元に戻せない');
-    await evaluate(`document.getElementById('undo-btn').click()`);
-    assert(await L('L.game().wall.pattern') === 'plain', '壁の柄を元に戻せない');
-    assert(await evaluate(`document.querySelector('#surface-panel [data-kind="wall"] .pattern[aria-pressed="true"]').dataset.pattern`) === 'plain', '戻したのに柄の印が古いまま');
-    await evaluate(`document.getElementById('redo-btn').click()`);
-    await evaluate(`document.getElementById('redo-btn').click()`);
-    await evaluate(`document.querySelector('.tab[data-tab="furniture"]').click()`);
-});
-
-await test('家具の部品の面がぴったり重なっていない（チラつき防止）', async () => {
-    const issues = await L('L.findCoplanarFaces()');
-    assert(issues.length === 0, issues.join(', '));
-    // 検出できることも確かめる: 直す前のクローゼット（台座と本体が同じ面を持つ）
-    const old = await evaluate(`(() => { const L = window.__lifemaker; const F = L.FURNITURE;
-        F.zz_old = { ...F.wardrobe, build: (g, c) => { L.testBox(g, 0.94, 1.9, 0.46, c.main, 0, 0, -0.01); L.testBox(g, 0.94, 0.08, 0.46, c.main, 0, 0, -0.01); } };
-        const r = L.findCoplanarFaces(); delete F.zz_old; return r; })()`);
-    assert(old.some(x => x.startsWith('zz_old')), '古いクローゼットの重なりを見つけられない');
-});
-
-await test('小物は家具の上に載り、家具といっしょに動く・回る', async () => {
-    await evaluate(`document.querySelector('#items .item[data-type="table"]').click()`);
-    const t = await L('L.selected()');
-    await evaluate(`document.querySelector('#items .item[data-type="mug"]').click()`);
-    const m = await L('L.selected()');
-    assert(await L(`L.kindOf(L.game().items.find(i => i.uid === ${m}))`) === 'small', '小物になっていない');
-    assert(await L(`L.smallBase(L.game().items.find(i => i.uid === ${m}))`) > 0.3, '小物が家具の上に置かれない');
-    // テーブルの角のマスに載せる
-    await L(`(() => { const g = L.game(); const tb = g.items.find(i => i.uid === ${t}), mg = g.items.find(i => i.uid === ${m}); mg.gx = tb.gx; mg.gz = tb.gz; L.rebuildAll(); L.select(${t}); })()`);
-    const h = await L(`L.smallBase(L.game().items.find(i => i.uid === ${m}))`);
-    assert(Math.abs(h - 0.732) < 0.001, `テーブルの天面の高さにならない: ${h}`);
-    const before = await L(`(() => { const g = L.game(); const tb = g.items.find(i => i.uid === ${t}), mg = g.items.find(i => i.uid === ${m}); return { dx: mg.gx - tb.gx, dz: mg.gz - tb.gz, tgx: tb.gx, tgz: tb.gz }; })()`);
-    const p = await L(`L.screenOf(${t}, 0.73)`);
-    await dragMouse(p, { x: p.x - 50, y: p.y + 35 }, 10);
-    const after = await L(`(() => { const g = L.game(); const tb = g.items.find(i => i.uid === ${t}), mg = g.items.find(i => i.uid === ${m}); return { dx: mg.gx - tb.gx, dz: mg.gz - tb.gz, tgx: tb.gx, tgz: tb.gz }; })()`);
-    assert(after.tgx !== before.tgx || after.tgz !== before.tgz, 'テーブルが動かない');
-    assert(after.dx === before.dx && after.dz === before.dz, `小物がいっしょに動かない: ${JSON.stringify([before, after])}`);
-    // 回すと、小物もテーブルの上に残る
-    await evaluate(`document.getElementById('rotate-btn').click()`);
-    const r = await L(`(() => { const g = L.game(); const tb = g.items.find(i => i.uid === ${t}), mg = g.items.find(i => i.uid === ${m}); const [w, d] = L.footprint(tb); return { inside: mg.gx >= tb.gx && mg.gx < tb.gx + w && mg.gz >= tb.gz && mg.gz < tb.gz + d, h: L.smallBase(mg) }; })()`);
-    assert(r.inside && r.h > 0.7, `回したら小物が落ちた: ${JSON.stringify(r)}`);
-    // テーブルをしまうと床に下り、戻すと上に戻る
+    assert(await L('L.game().items.length') === n + 1, 'やり直せない');
+    await L('L.select(L.game().items[L.game().items.length - 1].uid)');
     await evaluate(`document.getElementById('remove-btn').click()`);
-    assert(await L(`L.smallBase(L.game().items.find(i => i.uid === ${m}))`) === 0, 'しまったのに小物が浮いている');
-    await evaluate(`document.getElementById('undo-btn').click()`);
-    assert(await L(`L.smallBase(L.game().items.find(i => i.uid === ${m}))`) > 0.7, '戻したのに小物が上に戻らない');
 });
 
-await test('壁掛けは見えている壁に掛かり、壁に沿って動かせる', async () => {
-    await evaluate(`document.querySelector('#items .item[data-type="picture"]').click()`);
-    const uid = await L('L.selected()');
-    let it = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
-    assert((await L('L.walls()'))[it.rot], '隠れた壁に掛かった');
-    assert(await evaluate(`document.getElementById('rotate-btn').hidden`), '壁掛けに回転ボタンが出ている');
-    assert(!(await L(`L.isBlocked(L.game().items.find(i => i.uid === ${uid}))`)), 'ほかの壁掛けと重なっている');
-    await evaluate(`document.querySelector('#items .item[data-type="wallclock"]').click()`);
-    const c = await L('L.selected()');
-    assert(!(await L(`L.isBlocked(L.game().items.find(i => i.uid === ${c}))`)), '2 つ目の壁掛けが重なった');
-    await L(`L.select(${uid})`);
-    const p = await L(`L.screenOf(${uid}, 0.35)`);
-    await dragMouse(p, { x: p.x + 6, y: p.y - 45 }, 10);
-    const moved = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
-    assert(moved.gz > it.gz, `上に動かない: ${it.gz} → ${moved.gz}`);
-    assert(moved.gz * 0.1 + 0.7 <= 2.6 + 1e-9, '天井を突き抜けた');
-    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save')).items.find(i => i.uid === ${uid})`);
-    assert(saved.gz === moved.gz && saved.rot === moved.rot, '動かした位置が保存されていない');
-    // 部屋を回して、その壁が隠れたら壁掛けも隠れる
-    const az = await L('L.cam.azimuth');
-    await L('(L.cam.azimuth += Math.PI, L.updateCamera())');
-    assert(!(await L(`L.visibleOf(${uid})`)), '隠れた壁の壁掛けが見えている');
-    await L(`(L.cam.azimuth = ${az}, L.updateCamera())`);
-    assert(await L(`L.visibleOf(${uid})`), '壁が戻ったのに壁掛けが見えない');
-    await evaluate(`document.getElementById('done-btn').click()`);
-});
-await shot('04_wall_small');
-
-await test('本棚の本は何冊かずつまとめて色が変わる', async () => {
-    await evaluate(`document.querySelector('#items .item[data-type="bookshelf"]').click()`);
-    const uid = await L('L.selected()');
-    await evaluate(`document.getElementById('color-btn').click()`);
-    const parts = await evaluate(`[...document.querySelectorAll('#color-dialog .cd-part')].map(b => b.textContent)`);
-    assert(JSON.stringify(parts) === JSON.stringify(['本棚', '背板', '本 1', '本 2', '本 3']), `部位が違う: ${parts}`);
-    await evaluate(`document.querySelectorAll('#color-dialog .cd-part')[2].click()`);
-    await evaluate(`document.querySelectorAll('#color-dialog .cd-palette .cswatch')[12].click()`);
-    const cs = await L(`L.game().items.find(i => i.uid === ${uid}).colors`);
-    assert(cs.books1 === '#d9534f', `本 1 の色が変わらない: ${JSON.stringify(cs)}`);
-    const colors = await L(`L.meshColors(${uid})`);
-    assert(colors.includes('#d9534f') && !colors.includes('#c45c4a'), `本の色が変わっていない: ${colors}`);
-    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
-    await sleep(300);
-});
-
-await test('色の画面を開いてもカメラは動かず、隠れるときだけ少しずらす', async () => {
-    const target = await L('L.cam.target.toArray()');
-    const az = await L('L.cam.azimuth');
-    // 画面の上のほうにある家具（隠れない）
-    const sel = await L(`(() => { const g = L.game(); let best = null, by = Infinity; for (const it of g.items) { if (L.kindOf(it) !== 'floor') continue; const y = L.screenOf(it.uid, 0).y; if (y < by) { by = y; best = it.uid; } } return best; })()`);
-    await L(`L.select(${sel})`);
-    await evaluate(`document.getElementById('color-btn').click()`);
-    await sleep(400);
-    assert(await L('L.viewShift()') === 0, `隠れない家具なのにずれた: ${await L('L.viewShift()')}`);
-    assert(JSON.stringify(await L('L.cam.target.toArray()')) === JSON.stringify(target) && await L('L.cam.azimuth') === az, 'カメラが動いた');
-    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
-    await sleep(400);
-    // 画面のいちばん下の家具（シートに隠れる）
-    const low = await L(`(() => { const g = L.game(); let best = null, by = -Infinity; for (const it of g.items) { if (L.kindOf(it) !== 'floor') continue; const y = L.screenOf(it.uid, 0).y; if (y > by) { by = y; best = it.uid; } } return best; })()`);
-    await L(`L.select(${low})`);
-    await evaluate(`document.getElementById('color-btn').click()`);
-    await sleep(400);
-    const shift = await L('L.viewShift()');
-    const h = await evaluate(`document.getElementById('view').clientHeight`);
-    assert(shift > 0 && shift <= h * 0.45 + 0.5, `隠れる家具なのにずれない、またはずれすぎ: ${shift} / ${h}`);
-    const top1 = await evaluate(`document.getElementById('color-dialog').getBoundingClientRect().top`);
-    await evaluate(`document.querySelectorAll('#color-dialog .cd-part')[1]?.click()`);
-    const top2 = await evaluate(`document.getElementById('color-dialog').getBoundingClientRect().top`);
-    assert(top1 === top2, `部位を切り替えたら画面の上端が動いた: ${top1} → ${top2}`);
-    await shot('05_color_low');
-    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
-    await sleep(400);
-    assert(await L('L.viewShift()') === 0, '閉じたのにずれたまま');
-    assert(JSON.stringify(await L('L.cam.target.toArray()')) === JSON.stringify(target), 'カメラが動いた');
-    await L('L.select(null)');
-});
-
-await test('テレビは小物で、テレビ台の上に置かれる', async () => {
-    assert(await L('L.FURNITURE.tv.small') === true, 'テレビが小物になっていない');
-    await evaluate(`document.querySelector('#items .item[data-type="tvstand"]').click()`);
-    const st = await L('L.selected()');
-    await evaluate(`document.querySelector('#items .item[data-type="tv"]').click()`);
-    const tv = await L('L.selected()');
-    const s = await L(`L.supportOf(L.game().items.find(i => i.uid === ${tv}))?.uid ?? null`);
-    assert(s === st, `テレビがテレビ台に載らない: ${s} / ${st}`);
-    assert(!(await L(`L.isBlocked(L.game().items.find(i => i.uid === ${tv}))`)), 'テレビ台の上なのに重なりの印になる');
-    await evaluate(`document.getElementById('done-btn').click()`);
-});
-
-await test('本棚は「きっちり」と「ばらばら」の 2 種類', async () => {
-    const r = await L(`({ a: L.FURNITURE.bookshelf.name, b: L.FURNITURE.bookshelf2.name, bs: L.FURNITURE.bookshelf2.slots.map(s => s.name) })`);
-    assert(r.a.includes('きっちり') && r.b.includes('ばらばら'), `名前が違う: ${r.a} / ${r.b}`);
-    assert(r.bs.filter(n => n.startsWith('本 ')).length === 4, `ばらばらの本の部位が 4 つない: ${r.bs}`);
-    await evaluate(`document.querySelector('#items .item[data-type="bookshelf2"]').click()`);
-    const uid = await L('L.selected()');
-    const n = (await L(`L.meshColors(${uid})`)).length;
-    assert(n >= 12, `ばらばらの本棚の色が少ない: ${n}`);
-    await evaluate(`document.getElementById('done-btn').click()`);
-});
-
-await test('マス目と自由配置を切り替えられる', async () => {
-    const btn = () => evaluate(`document.getElementById('snap-btn').textContent`);
-    assert((await btn()).includes('マス目') && await L('L.game().snap') === true, '最初がマス目になっていない');
-    await evaluate(`document.getElementById('snap-btn').click()`);
-    assert((await btn()).includes('自由') && await L('L.game().snap') === false, '自由に切り替わらない');
-    await evaluate(`document.querySelector('#items .item[data-type="vase"]').click()`);
-    const uid = await L('L.selected()');
-    const p = await L(`L.screenOf(${uid}, 0.1)`);
-    await dragMouse(p, { x: p.x + 23, y: p.y + 11 }, 10);
-    let it = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
-    assert(!Number.isInteger(it.gx) || !Number.isInteger(it.gz), `自由に置けていない: ${it.gx}, ${it.gz}`);
-    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save'))`);
-    assert(saved.snap === false && saved.items.find(i => i.uid === uid).gx === it.gx, '自由配置が保存されていない');
-    // 開き直しても位置と設定が残る
-    await open();
-    it = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
-    assert(it.gx === saved.items.find(i => i.uid === uid).gx && await L('L.game().snap') === false, '開き直すと自由配置が消える');
-    // マス目に戻して動かすと、マスにそろう
-    await evaluate(`document.getElementById('snap-btn').click()`);
-    await L(`L.select(${uid})`);
-    const q = await L(`L.screenOf(${uid}, 0.1)`);
-    await dragMouse(q, { x: q.x + 40, y: q.y + 30 }, 10);
-    it = await L(`({ ...L.game().items.find(i => i.uid === ${uid}) })`);
-    assert(Number.isInteger(it.gx) && Number.isInteger(it.gz), `マス目にそろわない: ${it.gx}, ${it.gz}`);
-    await evaluate(`document.getElementById('done-btn').click()`);
-});
-
-await test('小物は少し外れた所を押しても選べる', async () => {
-    await evaluate(`document.querySelector('#items .item[data-type="mug"]').click()`);
-    const uid = await L('L.selected()');
-    await L('L.select(null)');
-    // ほかの家具に隠れない場所を探して置く
-    const found = await L(`(() => { const it = L.game().items.find(i => i.uid === ${uid});
-        for (let gz = 11; gz >= 0; gz--) for (let gx = 0; gx < 12; gx++) {
-            it.gx = gx; it.gz = gz; L.rebuildAll();
-            if (L.isBlocked(it)) continue;
-            const p = L.screenOf(${uid}, 0.06);
-            if (L.pickItem(p.x, p.y, 0) === ${uid} && L.pickItem(p.x + 16, p.y + 6, 0) === null) return true;
-        } return false; })()`);
-    assert(found === true, '見える場所が見つからない');
-    const p = await L(`L.screenOf(${uid}, 0.06)`);
-    assert(await L(`L.pickItem(${p.x}, ${p.y}, 0)`) === uid, '真ん中を押しても選べない');
-    assert(await L(`L.pickItem(${p.x + 16}, ${p.y + 6}, 22)`) === uid, '少し外れた所で選べない');
-    await tapAt({ x: p.x + 8, y: p.y + 3 }); // マウスは 10px まで
-    assert(await L('L.selected()') === uid, 'タップで選べない');
-    await evaluate(`document.getElementById('done-btn').click()`);
+await test('部屋をプリセットに保存して呼び出せる', async () => {
+    await L(`L.savePreset('テスト')`);
+    const id = await L('L.game().presets[0].id');
+    const n = await L('L.game().items.length');
+    await L('L.select(2)'); await L('L.removeSelected()');
+    assert(await L('L.game().items.length') === n - 1, 'しまえない');
+    await L(`L.loadPreset(${id})`);
+    assert(await L('L.game().items.length') === n, '呼び出しで戻らない');
 });
 
 await test('しまうと消える', async () => {
-    const n = await L('L.game().items.length');
-    await evaluate(`document.querySelector('#items .item[data-type="lamp"]').click()`);
+    await L('L.select(3)');
     await evaluate(`document.getElementById('remove-btn').click()`);
-    assert(await L('L.game().items.length') === n, '消えない');
-    assert(await evaluate(`document.getElementById('toolbar').hidden`), '道具の帯が残る');
+    assert(!(await L('L.game().items.some(i => i.uid === 3)')), '消えない');
+    assert(await L('L.selected()') === null, '選択が残っている');
 });
 
 await test('開き直しても部屋が残る', async () => {
-    const before = await L('JSON.stringify(L.game().items)');
+    const items = await L('JSON.stringify(L.game().items)');
     await open();
-    assert(await L('JSON.stringify(L.game().items)') === before, '部屋が元に戻っていない');
+    assert(await L('JSON.stringify(L.game().items)') === items, '部屋が戻らない');
 });
 
 await test('壊れたセーブでも起動する', async () => {
-    await send('Page.navigate', { url: 'about:blank' });
-    await sleep(200);
-    await send('Page.navigate', { url: BASE + 'tests/blank.html' });
-    await sleep(200);
-    await evaluate(`localStorage.setItem('lifemaker_save', '{壊れた')`);
+    await clearSave();
+    await evaluate(`localStorage.setItem('lifemaker2d_save', '{broken')`);
     await open();
-    assert(await L('L.game().items.length') === 4, '初期状態で起動していない');
-    assert(await evaluate(`localStorage.getItem('lifemaker_save_corrupted')`) === '{壊れた', '壊れたデータを退避していない');
+    assert(await L('L.game().items.length') === 5, '初期の部屋で起動しない');
+    assert(await evaluate(`localStorage.getItem('lifemaker2d_save_corrupted') === '{broken'`), '壊れたデータが退避されていない');
 });
 
 await test('おかしな値のセーブを直して読む', async () => {
-    await send('Page.navigate', { url: 'about:blank' });
-    await sleep(200);
-    await send('Page.navigate', { url: BASE + 'tests/blank.html' });
-    await sleep(200);
-    await evaluate(`localStorage.setItem('lifemaker_save', JSON.stringify({ floor: { pattern: 'lava', color: 'red' }, items: [{ uid: 1, type: 'bed', gx: 99, gz: -5, rot: 7, color: '#ABCDEF' }, { uid: 1, type: 'bed', gx: 0, gz: 0, rot: 0 }, { uid: 2, type: 'ufo', gx: 0, gz: 0, rot: 0 }], nextUid: 'x' }))`);
-    await open();
-    const r = await L(`({ items: L.game().items, next: L.game().nextUid })`);
-    assert(r.items.length === 1, '重複・知らない家具が残っている');
-    const it = r.items[0];
-    // ベッドは 2×4 マス。向き 3 で 4×2 になるので、右端は 12 - 4 = 8
-    assert(it.rot === 3 && it.gx === 8 && it.gz === 0, `位置や向きが直っていない: ${JSON.stringify(it)}`);
-    assert(r.next === 2, 'nextUid が直っていない');
-    assert(JSON.stringify(it.colors) === JSON.stringify({ main: '#abcdef' }), `v0.2.0 の 1 色の形式が移っていない: ${JSON.stringify(it.colors)}`);
-    const f = await L('L.game().floor');
-    assert(f.pattern === 'wood' && f.color === null, `おかしな床が直っていない: ${JSON.stringify(f)}`);
-});
-
-await test('v0.4.0 までのテレビ台は、テレビを分けて上に載せる', async () => {
     await clearSave();
-    await evaluate(`localStorage.setItem('lifemaker_save', JSON.stringify({ saveVersion: 2, nextUid: 3, items: [{ uid: 2, type: 'tvstand', gx: 2, gz: 0, rot: 1, colors: { main: '#112233', tv: '#445566' } }],
-        presets: [{ id: 1, name: 'a', items: [{ uid: 1, type: 'tvstand', gx: 0, gz: 0, rot: 0, colors: {} }] }] }))`);
+    await evaluate(`localStorage.setItem('lifemaker2d_save', JSON.stringify({ items: [
+        { uid: 1, type: 'sofa', gx: 99, gz: -5, rot: 7 }, { uid: 1, type: 'bed', gx: 0, gz: 0 }, { uid: 2, type: 'nothing' }, { uid: 3, type: 'bed', gx: 'a', gz: null }
+    ], resident: { show: false, name: '  なまえがとてもながいなまえです  ' }, presets: 'x' }))`);
     await open();
-    const r = await L(`(() => { const g = L.game(); const tv = g.items.find(i => i.type === 'tv'); return { n: g.items.length, tv, sup: tv && L.supportOf(tv)?.type, next: g.nextUid, st: g.items.find(i => i.type === 'tvstand').colors, pn: g.presets[0].items.map(i => i.type) }; })()`);
-    assert(r.n === 2 && r.tv && r.sup === 'tvstand', `テレビが分かれていない: ${JSON.stringify(r)}`);
-    assert(r.tv.rot === 1 && r.tv.colors.main === '#445566', `テレビの向きや色が引き継がれていない: ${JSON.stringify(r.tv)}`);
-    assert(JSON.stringify(r.st) === JSON.stringify({ main: '#112233' }), `テレビ台の色が変: ${JSON.stringify(r.st)}`);
-    assert(r.next > r.tv.uid, 'nextUid がテレビの番号より小さい');
-    assert(JSON.stringify(r.pn) === JSON.stringify(['tvstand', 'tv']), `プリセットのテレビが分かれていない: ${r.pn}`);
-    // 新しい形式で保存したあとは、もう一度分けない
-    await L('L.save()');
-    await open();
-    assert(await L(`L.game().items.filter(i => i.type === 'tv').length`) === 1, 'テレビが増えた');
+    const g = await L('L.game()');
+    assert(g.items.length === 2, `数が違う: ${g.items.length}`);
+    const sofa = g.items.find(i => i.type === 'sofa');
+    assert(sofa.rot === 1 && sofa.gx === 8 && sofa.gz === 0, `はみ出しが直っていない: ${JSON.stringify(sofa)}`);
+    assert(g.resident.show === false && g.resident.name === 'なまえがとてもながいなま', `住人の設定: ${JSON.stringify(g.resident)}`);
+    assert(Array.isArray(g.presets) && g.presets.length === 0, 'プリセットが直っていない');
 });
-
-if (SHOT_DIR) {
-    await clearSave();
-    for (const [name, w, h, mobile] of [['phone_390x844', 390, 844, true], ['phone_360x640', 360, 640, true], ['land_844x390', 844, 390, true], ['land_667x375', 667, 375, true], ['pc_1366x768', 1366, 768, false]]) {
-        await open('', { width: w, height: h, mobile });
-        await shot('size_' + name);
-    }
-    await evaluate(`document.documentElement.dataset.theme = 'dark'`);
-    await open('', { width: 390, height: 844 });
-    await evaluate(`document.getElementById('menu-btn').click()`);
-    await shot('menu');
-    await evaluate(`document.getElementById('menu').close()`);
-    await evaluate(`document.querySelector('#items .item[data-type="sofa"]').click()`);
-    await evaluate(`document.getElementById('color-btn').click()`);
-    await evaluate(`document.querySelectorAll('#color-dialog .cd-palette .cswatch')[6].click()`);
-    await shot('color_dark');
-    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
-    await evaluate(`delete document.documentElement.dataset.theme; document.documentElement.dataset.theme = 'light'`);
-    await evaluate(`document.getElementById('preset-btn').click()`);
-    await shot('preset_light');
-    await evaluate(`document.getElementById('preset-dialog').close()`);
-    await open('', { width: 360, height: 640 });
-    await evaluate(`document.querySelector('#items .item[data-type="sofa"]').click()`);
-    await evaluate(`document.getElementById('color-btn').click()`);
-    await shot('color_360');
-    await evaluate(`document.querySelector('#color-dialog .cd-close').click()`);
-    await sleep(300);
-    // 床・壁
-    await open('', { width: 390, height: 844 });
-    await evaluate(`document.querySelector('.tab[data-tab="surface"]').click()`);
-    await shot('surface_default');
-    for (const [f, w] of [['tatami', 'wainscot'], ['tile', 'brick'], ['carpet', 'stripe']]) {
-        await evaluate(`document.querySelector('#surface-panel [data-kind="floor"] .pattern[data-pattern="${f}"]').click()`);
-        await evaluate(`document.querySelector('#surface-panel [data-kind="wall"] .pattern[data-pattern="${w}"]').click()`);
-        await shot(`surface_${f}_${w}`);
-    }
-    // クローゼットの近く（チラつきの確認）
-    await evaluate(`document.querySelector('.tab[data-tab="furniture"]').click()`);
-    await evaluate(`document.querySelector('#items .item[data-type="wardrobe"]').click()`);
-    await evaluate(`document.querySelector('#items .item[data-type="bookshelf"]').click()`);
-    await evaluate(`document.getElementById('done-btn').click()`);
-    await evaluate(`(() => { const L = window.__lifemaker; L.cam.radius = 5; L.cam.polar = 1.25; L.cam.azimuth = 0.3; })()`);
-    await dragMouse({ x: 20, y: 300 }, { x: 21, y: 300 }, 1);
-    await shot('closeup');
-}
 
 // ---------- 住人 ----------
 await clearSave();
@@ -627,50 +275,47 @@ await test('住人がいて、家具を避けて歩く', async () => {
     const st = await R('R.state()');
     assert(st.visible, '住人が見えていない');
     assert(await R(`R.free(${st.x}, ${st.z})`), '家具の上に立っている');
-    // 部屋の端から端へ歩かせて、道が家具を通らないか・途中で家具に入らないかを見る
-    await R('R.place(-2.2, 2.2)');
+    await R('R.place(1, 1)');
     let bad = 0, moved = 0;
     for (let n = 0; n < 6; n++) {
         await R('R.state().mode === "idle" && R.go(null)'); // 立ち止まっていたら、次の行き先を決めさせる
         const before = await R('R.state()');
-        if (before.path.length) {
-            let ax = before.x, az = before.z;
-            for (const p of before.path) { if (!(await R(`R.line(${ax}, ${az}, ${p.x}, ${p.z})`))) bad++; ax = p.x; az = p.z; }
-        }
+        let ax = before.x, az = before.z;
+        for (const p of before.path) { if (!(await R(`R.line(${ax}, ${az}, ${p.x}, ${p.z})`))) bad++; ax = p.x; az = p.z; }
         for (let k = 0; k < 20; k++) {
             await R('R.step(0.3)');
             const s = await R('R.state()');
             if (s.mode !== 'use' && !(await R(`R.free(${s.x}, ${s.z})`))) bad++;
-            moved = Math.max(moved, Math.hypot(s.x + 2.2, s.z - 2.2));
+            moved = Math.max(moved, Math.hypot(s.x - 1, s.z - 1));
         }
     }
     assert(bad === 0, `家具を通った回数: ${bad}`);
-    assert(moved > 0.5, '歩いていない');
+    assert(moved > 1, '歩いていない');
+});
+
+await test('歩く向きで絵が変わる（手前は前向き、奥は後ろ姿）', async () => {
+    const look = (dx, dz) => R(`(() => { R.place(8, 7); R.walkTo(${8 + dx}, ${7 + dz}); R.step(0.2); return R.state().frame; })()`);
+    const front = await look(0, 1.2);   // 左下へ
+    const right = await look(1.2, 0);   // 右下へ
+    const back = await look(0, -1.2);   // 右上へ
+    const backL = await look(-1.2, 0);  // 左上へ
+    assert([2, 3].includes(front.n) && !front.flip, `左下へ歩く絵: ${JSON.stringify(front)}`);
+    assert([2, 3].includes(right.n) && right.flip, `右下へ歩く絵: ${JSON.stringify(right)}`);
+    assert(back.n === 4 && !back.flip, `右上へ歩く絵: ${JSON.stringify(back)}`);
+    assert(backL.n === 4 && backL.flip, `左上へ歩く絵: ${JSON.stringify(backL)}`);
 });
 
 await test('住人はソファに座り、ソファを動かすと立つ', async () => {
-    await R('R.place(0, 0.5)');
+    await R('R.place(5, 8.5)');
     assert(await R('R.go(4)'), 'ソファへ向かわない');
     let s;
     for (let k = 0; k < 60; k++) { await R('R.step(0.5)'); s = await R('R.state()'); if (s.mode === 'use' && s.k >= 1) break; }
     assert(s.mode === 'use' && s.act === 'sit' && s.k >= 1, `座っていない: ${JSON.stringify(s)}`);
-    assert(s.y > 0.1, '腰の高さが上がっていない');
-    if (SHOT_DIR) {
-        // 近くから見た姿（座る・立つ）
-        const c0 = await L('({ r: L.cam.radius, p: L.cam.polar, a: L.cam.azimuth, x: L.cam.target.x, z: L.cam.target.z })');
-        await L(`(() => { L.cam.target.set(${s.x}, 0.6, ${s.z}); L.cam.radius = 3.2; L.cam.polar = 1.15; L.cam.azimuth = Math.PI + 0.5; L.updateCamera(); })()`);
-        await R('R.step(0.05)');
-        await shot('resident_sit_close');
-        await R('R.place(1.0, -0.5)');
-        await L(`(() => { L.cam.target.set(1.0, 0.6, -0.5); L.cam.azimuth = 0.4; L.updateCamera(); })()`);
-        await R('R.step(0.5)');
-        await shot('resident_stand_close');
-        await L(`(() => { L.cam.target.set(${c0.x}, 0.6, ${c0.z}); L.cam.radius = ${c0.r}; L.cam.polar = ${c0.p}; L.cam.azimuth = ${c0.a}; L.updateCamera(); })()`);
-        await R('R.place(0, 0.5)');
-        await R('R.go(4)');
-        for (let k = 0; k < 40; k++) { await R('R.step(0.5)'); const t = await R('R.state()'); if (t.mode === 'use' && t.k >= 1) break; }
-    }
-    await L('(() => { const it = L.game().items.find(i => i.uid === 4); it.gz = 0; it.gx = 6; L.rebuildAll(); })()');
+    assert(s.frame.n === 5, `座った絵になっていない: ${JSON.stringify(s.frame)}`);
+    const order = await L('L.drawOrder()');
+    assert(order.indexOf('resident') === order.indexOf(4) + 1, `ソファのすぐ後に描かれていない: ${order}`);
+    await shot('resident_sit');
+    await L('(() => { const it = L.game().items.find(i => i.uid === 4); it.gz = 1; it.gx = 2; })()');
     await R('R.step(0.6)');
     s = await R('R.state()');
     assert(s.mode !== 'use', 'ソファが動いたのに座ったまま');
@@ -678,46 +323,51 @@ await test('住人はソファに座り、ソファを動かすと立つ', async
 });
 
 await test('住人はベッドで寝て、吹き出しに 💤 が出る', async () => {
-    await R('R.place(0, 0.5)');
+    await R('R.place(5, 8.5)');
     assert(await R('R.go(2)'), 'ベッドへ向かわない');
     let s;
     for (let k = 0; k < 60; k++) { await R('R.step(0.5)'); s = await R('R.state()'); if (s.mode === 'use' && s.k >= 1) break; }
-    assert(s.act === 'lie' && s.k >= 1, `寝ていない: ${JSON.stringify(s)}`);
+    assert(s.act === 'lie' && s.k >= 1 && s.frame.n === 6, `寝ていない: ${JSON.stringify(s)}`);
     await R('R.step(3)');
     assert((await R('R.state()')).bubble === '💤', '💤 が出ていない');
     await shot('resident_sleep');
 });
 
-await test('住人を押すと話す（家具は選ばれない）', async () => {
-    await R('R.place(1.5, -1)');
-    await R('R.step(0.1)');
+await test('住人を押すと笑って話す（家具は選ばれない）', async () => {
+    await L('L.select(null)');
+    await R('R.place(6, 8.5)');
     const p = await R('R.screen()');
-    await mouse('mousePressed', p.x, p.y);
-    await mouse('mouseReleased', p.x, p.y, 0);
-    await sleep(100);
-    await R('R.step(0.1)');
+    await tapAt(p);
+    await R('R.step(0.05)');
     const s = await R('R.state()');
     assert(s.bubble && s.bubble !== '💤', `吹き出しが出ない: ${s.bubble}`);
+    assert(s.frame.n === 7, `笑った絵になっていない: ${JSON.stringify(s.frame)}`);
     assert(await L('L.selected()') === null, '家具が選ばれた');
     await shot('resident_talk');
 });
 
 await test('置いた家具を住人が見に行く', async () => {
-    await R('R.place(0, 0.5)');
-    await evaluate(`document.querySelector('#items .item[data-type="chair"]').click()`);
+    // 前のテストで動かしたソファを元の場所に戻す
+    await L('(() => { const it = L.game().items.find(i => i.uid === 4); it.gx = 0; it.gz = 5; })()');
+    await R('R.freeze(false, false)');
+    await R('R.place(6, 8.5)');
+    await evaluate(`document.querySelector('#items .item[data-type="plant"]').click()`);
     await sleep(900);
     const uid = await L('L.selected()');
     const s = await R('R.state()');
-    assert(s.uid === uid && s.mode === 'walk', `いすへ向かわない: ${JSON.stringify(s)}`);
+    assert(s.uid === uid, `植物へ向かわない: ${JSON.stringify(s)}`);
     await evaluate(`document.getElementById('done-btn').click()`);
+    await R('R.freeze(true, false)');
 });
 
-await test('設定で住人を隠せて、保存される', async () => {
+await test('設定で名前を付けられ、住人を隠せて、保存される', async () => {
     await evaluate(`document.getElementById('menu-btn').click()`);
     assert(await evaluate(`document.getElementById('resident-toggle').checked`), '最初から外れている');
+    await evaluate(`(() => { const i = document.getElementById('resident-name'); i.value = ' くろ '; i.dispatchEvent(new Event('change')); })()`);
     await evaluate(`(() => { const c = document.getElementById('resident-toggle'); c.checked = false; c.dispatchEvent(new Event('change')); })()`);
     assert(!(await R('R.state()')).visible, '隠れない');
-    assert(await evaluate(`JSON.parse(localStorage.getItem('lifemaker_save')).resident === false`), '保存されていない');
+    const saved = await evaluate(`JSON.parse(localStorage.getItem('lifemaker2d_save')).resident`);
+    assert(saved.show === false && saved.name === 'くろ', `保存されていない: ${JSON.stringify(saved)}`);
     await evaluate(`document.getElementById('menu-close').click()`);
     await open('', { resident: true });
     assert(!(await R('R.state()')).visible, '開き直すと出てくる');
@@ -729,11 +379,15 @@ await test('設定で住人を隠せて、保存される', async () => {
 
 await test('住人がひとりで動き続けても止まらない', async () => {
     await sleep(3000); // 実際の時間で動かす（エラーは最後のテストで確かめる）
-    const a = await R('R.state()');
-    await sleep(1500);
-    const b = await R('R.state()');
-    assert(a.visible && b.visible, '見えていない');
+    assert((await R('R.state()')).visible, '見えていない');
 });
+
+if (SHOT_DIR) {
+    await open('', { width: 1366, height: 768, mobile: false, resident: true });
+    await shot('pc');
+    await open('', { width: 844, height: 390, resident: true });
+    await shot('phone_landscape');
+}
 
 await test('ページでエラーが出ていない', async () => {
     assert(errors.length === 0, errors.join('\n'));

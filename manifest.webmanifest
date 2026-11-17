@@ -1,7 +1,7 @@
 {
     "name": "LifeMaker",
     "short_name": "LifeMaker",
-    "description": "スマホで遊ぶ3Dの模様替えゲーム",
+    "description": "スマホで遊ぶ模様替えゲーム",
     "lang": "ja",
     "start_url": "./",
     "scope": "./",
