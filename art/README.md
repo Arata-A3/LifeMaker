@@ -43,7 +43,7 @@ Background: one solid flat magenta color (#FF00FF) everywhere.
 
 ## 2. 家具（1 つにつき 1 枚）
 
-住人と同じ会話の中で、次の文の `<家具の説明>` を入れ替えて送る。
+住人と同じ会話の中で、次の文の `<家具の説明>` を入れ替えて送る。入れ替え済みの文は [prompts.md](prompts.md) にある。
 
 ```
 Same art style as the previous image. Draw a single piece of furniture for the same isometric room game:
