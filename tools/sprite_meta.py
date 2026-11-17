@@ -79,7 +79,7 @@ def wall_box(alpha):
     top = np.array([np.argmax(alpha[:, x]) for x in cols], dtype=np.float64)
     bot = np.array([h - 1 - np.argmax(alpha[::-1, x]) for x in cols], dtype=np.float64)
     xs = np.array(cols, dtype=np.float64)
-    mid = (xs > w * 0.2) & (xs < w * 0.8)  # 端の飾り（カーテンのすそなど）は見ない
+    mid = (xs > w * 0.3) & (xs < w * 0.7)  # 端の飾り（カーテンのすそなど）は見ない。真ん中の窓枠・額縁で測る
     # 上の辺と下の辺のうち、まっすぐな方（ずれの小さい方）で傾きを測る（アーチの窓は上の辺が曲がっている）
     fits = []
     for edge in (top, bot):

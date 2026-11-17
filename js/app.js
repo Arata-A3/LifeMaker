@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.10.2';
+const APP_VERSION = '0.10.3';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 3; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに
 
@@ -534,6 +534,7 @@ function floorShadow(g, gx, gz, w, d, alpha = 0.22) {
 }
 
 // ---------- 部屋を描く ----------
+const SUN_IN = 1.1, SUN_SIDE = 0.45; // 日差しの向き（高さ 1m 下がるごとに、部屋の奥へ・横へ進むマス）
 function drawRoom(g) {
     quad(g, P(0, 0, 0), P(0, N, 0), P(0, N, WALL_H), P(0, 0, WALL_H), '#e4ddd2');
     quad(g, P(0, 0, 0), P(N, 0, 0), P(N, 0, WALL_H), P(0, 0, WALL_H), '#d8cfc2');
@@ -564,13 +565,19 @@ function drawRoom(g) {
         g.fillStyle = k % 2 ? 'rgba(201,157,118,0.25)' : 'rgba(160,119,82,0.25)';
         g.beginPath(); g.ellipse(x, y, 18 + k % 5 * 4, 7 + k % 3 * 2, 0, 0, Math.PI * 2); g.fill();
     }
-    // 窓から差す光（左奥の壁の窓は、gx と gz を入れ替えた形）
+    // 窓から差す日差し: 窓のガラスの所を、斜め上からの日差しの向きで床に写す（桟の十字の影も入れる）
     for (const it of game.items) {
         const def = FURNITURE[it.type];
         if (!def.light) continue;
-        const a = it.gx, w = def.size[0];
-        const pts = [[a + 0.2, 0.2], [a + w, 0.2], [a + w + 1.6, 2.6], [a + 1.8, 2.6]].map(([u, v]) => (it.rot ? P(v, u) : P(u, v)));
-        softShape(g, pts, 'rgba(255, 244, 220, 0.3)', 14);
+        const len = def.size[0], h = wallHeight(def);
+        const u0 = it.gx + len * 0.18, u1 = it.gx + len * 0.82, y0 = it.y + h * 0.12, y1 = it.y + h * 0.85;
+        // 壁の点（壁に沿った位置 u、高さ y）→ 床の点。高さ 1m 下がるごとに、部屋の奥へ SUN_IN マス、横へ SUN_SIDE マス進む
+        const F = (u, y) => { const a = u + SUN_SIDE * y, b = SUN_IN * y; return it.rot ? P(b, a) : P(a, b); };
+        const quadPts = [F(u0, y0), F(u1, y0), F(u1, y1), F(u0, y1)];
+        softShape(g, quadPts, 'rgba(255, 238, 200, 0.28)', 3);
+        g.strokeStyle = 'rgba(110, 80, 50, 0.16)'; g.lineWidth = 3;
+        const um = (u0 + u1) / 2, ym = (y0 + y1) / 2;
+        g.beginPath(); g.moveTo(...F(um, y0)); g.lineTo(...F(um, y1)); g.moveTo(...F(u0, ym)); g.lineTo(...F(u1, ym)); g.stroke();
     }
     g.restore();
     path(g, floor);
