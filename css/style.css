@@ -193,6 +193,13 @@ dialog.sheet button:disabled { opacity: .45; cursor: default; }
 dialog.sheet .primary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
 dialog.sheet .wide { display: block; width: 100%; margin-top: 12px; }
 
+/* アイコン（SVG） */
+.ic { width: 1.2em; height: 1.2em; display: inline-block; vertical-align: -0.25em; flex: 0 0 auto; }
+[data-icon] { display: inline-flex; margin-right: 4px; }
+#menu-btn [data-icon] { margin-right: 0; }
+#menu-btn .ic { width: 22px; height: 22px; }
+#coins .ic, .shop-coins .ic, .shop-buy .ic { margin-right: 3px; }
+
 /* お店・お金 */
 #status {
     position: absolute; right: 10px; top: 10px; display: flex; gap: 8px; align-items: center;
@@ -213,6 +220,8 @@ dialog.sheet .wide { display: block; width: 100%; margin-top: 12px; }
 .shop-have { color: var(--muted); font-size: 10px; }
 .shop-have.new { color: var(--accent); font-weight: bold; }
 .shop-item button { width: 100%; padding: 6px 4px !important; font-variant-numeric: tabular-nums; }
+.shop-item .shop-keep { font-size: 11px; padding: 4px !important; }
+.shop-item .shop-keep[aria-pressed="true"] { border-color: var(--accent) !important; color: var(--accent); }
 .item-count { font-size: 10px; color: var(--muted); }
 .item.used-up img { opacity: .4; }
 

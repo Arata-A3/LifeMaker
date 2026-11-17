@@ -460,6 +460,26 @@ await test('お店で買うとお金が減り、一覧に出て置ける。お�
     assert(await L('L.game().coins') === 300 && await L('L.game().shop.sold.length') === 1, '開き直すとお金・売り切れが戻る');
 });
 
+await test('お金が足りない品物は取り置きでき、次の日もお店に残る', async () => {
+    await L(`L.setStock(['wardrobe', 'bed', 'tv', 'sofa', 'vase', 'desk'])`);
+    await L('L.openShop()');
+    const keep = `document.querySelector('#shop-list .shop-item .shop-keep')`;
+    assert(await evaluate(`!!${keep}`), '取り置きのボタンが出ない');
+    await evaluate(`${keep}.click()`);
+    assert(JSON.stringify(await L('L.game().reserved')) === '["wardrobe"]', '取り置きされない');
+    await L('L.toggleReserve("sofa")');
+    await L('L.toggleReserve("tv")'); // 3 つ目は取り置きできない
+    assert((await L('L.game().reserved')).length === 2, '取り置きが 2 つを超えた');
+    await evaluate(`document.getElementById('shop-close').click()`);
+    await L('L.advanceClock(L.DAY_SEC)');
+    const items = await L('L.game().shop.items');
+    assert(items.includes('wardrobe') && items.includes('sofa'), '次の日に取り置きが残らない: ' + items);
+    await L('L.game().coins = 5000');
+    assert(await L(`L.buy(L.game().shop.items.indexOf('wardrobe'))`), '取り置きを買えない');
+    assert(JSON.stringify(await L('L.game().reserved')) === '["sofa"]', '買っても取り置きが外れない');
+    await L('L.toggleReserve("sofa")');
+});
+
 await test('ゲームの時計が 1 日進むと、おこづかいが入り、品物が入れかわる', async () => {
     const before = await L('({ day: L.game().day, coins: L.game().coins })');
     await L('L.advanceClock(L.DAY_SEC / 2)');
@@ -587,14 +607,14 @@ await test('住人はソファに座り、ソファを動かすと立つ', async
     assert(await R(`R.free(${s.x}, ${s.z})`), '立ったあと家具に埋まっている');
 });
 
-await test('住人はベッドで寝て、吹き出しに 💤 が出る', async () => {
+await test('住人はベッドで寝て、吹き出しに Zzz が出る', async () => {
     await R('R.place(5, 8.5)');
     assert(await R('R.go(2)'), 'ベッドへ向かわない');
     let s;
     for (let k = 0; k < 60; k++) { await R('R.step(0.5)'); s = await R('R.state()'); if (s.mode === 'use' && s.k >= 1) break; }
     assert(s.act === 'lie' && s.k >= 1 && s.frame.n === 6, `寝ていない: ${JSON.stringify(s)}`);
     await R('R.step(3)');
-    assert((await R('R.state()')).bubble === '💤', '💤 が出ていない');
+    assert((await R('R.state()')).bubble === 'Zzz', 'Zzz が出ていない');
     await shot('resident_sleep');
 });
 
@@ -605,7 +625,7 @@ await test('住人を押すと笑って話す（家具は選ばれない）', as
     await tapAt(p);
     await R('R.step(0.05)');
     const s = await R('R.state()');
-    assert(s.bubble && s.bubble !== '💤', `吹き出しが出ない: ${s.bubble}`);
+    assert(s.bubble && s.bubble !== 'Zzz', `吹き出しが出ない: ${s.bubble}`);
     assert(s.frame.n === 7, `笑った絵になっていない: ${JSON.stringify(s.frame)}`);
     assert(await L('L.selected()') === null, '家具が選ばれた');
     await shot('resident_talk');
@@ -672,9 +692,23 @@ if (SHOT_DIR) {
         L.save(); L.render(); })()`);
     await R('R.freeze(true, true)');
     await shot('all_items');
+    // 壁掛けを両方の壁に掛けて、角が壁の四角に合っているか見る
+    await L(`(() => { const g = L.game(); g.items = [
+        { uid: 1, type: 'window', gx: 0.5, gz: 0, rot: 0, y: 0.85 }, { uid: 2, type: 'window2', gx: 4.5, gz: 0, rot: 0, y: 0.8 }, { uid: 3, type: 'picture', gx: 7.5, gz: 0, rot: 0, y: 1.1 },
+        { uid: 4, type: 'window', gx: 0.5, gz: 0, rot: 1, y: 0.85 }, { uid: 5, type: 'window2', gx: 4.5, gz: 0, rot: 1, y: 0.8 }, { uid: 6, type: 'picture', gx: 7.5, gz: 0, rot: 1, y: 1.1 }];
+        L.save(); L.select(1); L.render(); })()`);
+    await shot('all_wall');
     await open('', { width: 844, height: 390, resident: true });
     await shot('phone_landscape');
 }
+
+await test('画面とコードに絵文字を使っていない（機種で見た目が変わるため）', async () => {
+    const found = await evaluate(`(async () => {
+        const texts = [document.body.innerText, ...await Promise.all(['js/app.js', 'index.html'].map(async f => (await fetch(f)).text()))];
+        return [...new Set(texts.join('').match(/\\p{Extended_Pictographic}/gu) || [])].join(' ');
+    })()`);
+    assert(!found, '絵文字がある: ' + found);
+});
 
 await test('ページでエラーが出ていない', async () => {
     assert(errors.length === 0, errors.join('\n'));

@@ -12,6 +12,7 @@
 ## 全部に共通する決まり
 
 - **向き**: 斜め上から見下ろす「アイソメトリック（2:1）」。家具の正面は**左下**を向ける。右下向きは左右反転で作る。
+  - 壁掛け（窓・絵）だけは例外で、**真正面から見た平らな絵**にする。ゲームが壁の角度に合わせて斜めに変形する。
 - **背景**: 真っ赤や真っ白ではなく、**一色のマゼンタ（#FF00FF）**。透明はAIだと崩れやすいので、色を抜いて透明にする。
 - **影**: 床に落ちる影は描かない（ゲームで付ける）。
 - **大きさ**: 1024×1024 か、それ以上の正方形。
@@ -80,8 +81,7 @@ Background: one solid flat magenta color (#FF00FF) everywhere.
 | `tv.png` | a small flat-screen TV on a stand base |
 | `mug.png` | a ceramic mug with steam |
 | `vase.png` | a small vase with flowers |
-| `picture.png` | a framed landscape painting hanging on the wall (on the left wall, facing down-right) |
-| `window.png` | a window with muted red curtains (on the back-right wall, facing down-left) |
+| `picture.png`・`window.png`・`window2.png` | 壁掛けは**真正面から見た平らな絵**で作る。文は [prompts.md](prompts.md) の「壁掛け」 |
 
 ## できた絵
 

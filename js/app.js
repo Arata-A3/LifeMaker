@@ -1,7 +1,7 @@
 // LifeMaker（2D 版）: 斜め上から見た部屋に家具を置き、住人が暮らす。
 // 絵は画像生成AIで作り、tools/cut_sprites.py で img/ に書き出したものを使う（作り方は art/README.md）。
 
-const APP_VERSION = '0.12.0';
+const APP_VERSION = '0.13.0';
 const SAVE_KEY = 'lifemaker2d_save';
 const SAVE_VERSION = 4; // 2: 小物・壁掛け・色合いを追加 / 3: 色合いを部分ごとに / 4: お金・持ち物・ゲームの中の日・お店
 
@@ -71,6 +71,25 @@ function mix(a, b, t) {
     return '#' + [16, 8, 0].map(s => Math.round(((pa >> s) & 255) + (((pb >> s) & 255) - ((pa >> s) & 255)) * t).toString(16).padStart(2, '0')).join('');
 }
 
+// ---------- アイコン ----------
+// 絵文字は機種によって見た目が変わるので使わない。アイコンは SVG で描く（線の色は文字の色に合わせる）
+const ICON_PATHS = {
+    cart: '<path d="M3 4h2.2l2.3 10.3a1 1 0 0 0 1 .7h8.7a1 1 0 0 0 1-.7L20 8H6.3"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="16.5" cy="19" r="1.4"/>',
+    folder: '<path d="M3 7a1.5 1.5 0 0 1 1.5-1.5H9l2 2h8.5A1.5 1.5 0 0 1 21 9v8.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>',
+    settings: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+    palette: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-.9-.7-1.3-.7-2.1 0-.8.7-1.5 1.5-1.5H17a4 4 0 0 0 4-4c0-4.9-4-8.8-9-8.8z"/><circle cx="7.5" cy="11.5" r="1.1" fill="currentColor"/><circle cx="10" cy="7.5" r="1.1" fill="currentColor"/><circle cx="14.5" cy="7.5" r="1.1" fill="currentColor"/>',
+    fit: '<circle cx="12" cy="12" r="6.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/><circle cx="12" cy="12" r="1" fill="currentColor"/>',
+    zoom: '<circle cx="11" cy="11" r="6.5"/><path d="M20.5 20.5l-4.8-4.8M11 8v6M8 11h6"/>',
+    trash: '<path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5"/>',
+    coin: '<circle cx="12" cy="12" r="9" fill="#e3b448" stroke="#9a6d12"/><circle cx="12" cy="12" r="5.5" fill="none" stroke="#9a6d12" stroke-width="1.5"/>',
+};
+function icon(name) {
+    return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]}</svg>`;
+}
+function coinText(n) { return `${icon('coin')}${Number(n).toLocaleString()}`; }
+// HTML の <span data-icon="名前"> にアイコンを入れる
+for (const el of document.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon);
+
 // ---------- 状態とセーブ ----------
 function makeDefaultGame() {
     return {
@@ -93,6 +112,7 @@ function makeDefaultGame() {
         owned: { rug: 1, bed: 1, plant: 1, sofa: 1, lowtable: 1, window: 1, picture: 1 }, // 持っている家具の数（置いた分も含む）
         day: 1, clock: 0, // ゲームの中の日と、その日の経った秒数
         shop: { day: 0, items: [], sold: [] }, // その日の品ぞろえ（sold: 売れた品物の番号）
+        reserved: [], // 取り置きした家具（お金が貯まるまで、品物が入れかわってもお店に残る）
     };
 }
 const START_COINS = 600;
@@ -226,6 +246,7 @@ function loadGame() {
     for (const it of game.items) game.owned[it.type] = Math.max(game.owned[it.type] || 0, placedCount(it.type));
     game.day = Math.max(1, Math.round(num(p.day)) || 1);
     game.clock = Math.min(DAY_SEC - 1, Math.max(0, num(p.clock)));
+    if (Array.isArray(p.reserved)) game.reserved = [...new Set(p.reserved.filter(t => FURNITURE[t]))].slice(0, MAX_RESERVED);
     const sh = p.shop;
     if (sh && Number(sh.day) === game.day && Array.isArray(sh.items) && sh.items.every(t => FURNITURE[t])) {
         game.shop = { day: game.day, items: sh.items.slice(0, SHOP_SIZE), sold: Array.isArray(sh.sold) ? sh.sold.filter(i => Number.isInteger(i)) : [] };
@@ -325,7 +346,7 @@ function findFreeSpot(item) {
 // 絵ごとに、当たり判定用の不透明の地図と、色の部分の地図（img/<名前>_parts.png）も作る
 const images = new Map(); // name → { img, w, h, alpha, data, parts }
 let spriteMeta = {};      // img/sprites.json: 床の角（corners）と色の部分（parts: [{ name, color }]）
-// 手で直した合わせ方（「📐 合わせる」）。img/fit.json（みんなの画面に出る）に、この端末で直した分（localStorage）を重ねる
+// 手で直した合わせ方（「合わせる」ボタン）。img/fit.json（みんなの画面に出る）に、この端末で直した分（localStorage）を重ねる
 // { corners: [左, 手前, 右], face: [左上, 右上, 左下, 右下], base: [x, y, 幅], legInset, fitHeight }（点は絵の上の位置）
 const FIT_KEY = 'lifemaker2d_fit';
 let fitBase = {}, fitLocal = {}, fitVersion = 0;
@@ -591,7 +612,9 @@ function artMatrix(item) {
         // 本体（窓枠・額縁の正面）の 4 つの角を、壁の上の四角の角に合わせる
         let [tl, tr, bl, br] = meta.wall.face;
         const rightWallArt = (br[1] - bl[1]) > 0; // 下の辺が右下がりなら、右の壁向きの絵
-        const mirror = rightWallArt === !!item.rot;
+        // 正面から描いた絵（下の辺がほぼ水平）は、どちらの壁でも左右反転しない
+        const front = Math.abs((br[1] - bl[1]) / ((br[0] - bl[0]) || 1)) < 0.15;
+        const mirror = !front && rightWallArt === !!item.rot;
         {
             // 射影変換で 4 つの角をぴったり合わせる（反対の壁向きの絵は、左右の角を入れ替えて合わせると左右反転になる）
             const h = wallHeight(def), len = def.size[0];
@@ -613,7 +636,7 @@ function artMatrix(item) {
     }
     if (def.wall && meta.wall) {
         let { s, a, b } = meta.wall;
-        const mirror = (s > 0) === !!item.rot; // 右の壁向きの絵を左の壁に掛ける（またはその逆）
+        const mirror = Math.abs(s) >= 0.15 && (s > 0) === !!item.rot; // 右の壁向きの絵を左の壁に掛ける（またはその逆）。正面の絵は反転しない
         if (mirror) { a += s * W; b += s * W; s = -s; }
         const h = wallHeight(def), len = def.size[0];
         // 絵の左端の上・左端の下・右端の下 → 壁の上の四角（画面の左端が、右の壁では始まり、左の壁では終わり）
@@ -1201,7 +1224,7 @@ function renderCatalog() {
             wrap.appendChild(b);
         }
     }
-    if (!wrap.children.length) wrap.innerHTML = '<p class="empty">家具を持っていません。🛒 お店で買えます</p>';
+    if (!wrap.children.length) wrap.innerHTML = '<p class="empty">家具を持っていません。お店で買えます</p>';
     updateCatalogCounts();
 }
 // 一覧の「あと何個置けるか」
@@ -1372,7 +1395,8 @@ const RES = {
     fps: 30,        // 住人が動いている間の描き直しの回数（電池のため 30 回/秒まで）
 };
 const RES_GREETINGS = ['こんにちは！', 'いい部屋だね', '模様替え、たのしいね', 'なになに？', 'ふふっ'];
-const RES_IDLE_LINES = ['♪', 'ふんふん♪', 'お散歩', 'ひろびろ'];
+const RES_IDLE_LINES = ['ふんふん', 'ふんふふーん', 'お散歩', 'ひろびろ'];
+const SLEEP_TEXT = 'Zzz';
 const resident = {
     x: 5, z: 5, dirX: 0, dirZ: 1,      // 位置と向き（マス）
     mode: 'idle',                       // idle 立ち止まる / walk 歩く / use 家具を使う
@@ -1581,7 +1605,7 @@ function stopUsing(say) {
     const r = resident;
     if (r.use) { r.x = r.use.plan.to.x; r.z = r.use.plan.to.z; }
     r.use = null; r.plan = null; r.path = []; r.mode = 'idle'; r.timer = 0.6;
-    if (r.bubbleText === '💤') r.bubbleText = '';
+    if (r.bubbleText === SLEEP_TEXT) r.bubbleText = '';
     stepAside(say);
 }
 // 吹き出しの時間は住人の時間で数える（テストで時間を進めても合うように）
@@ -1633,10 +1657,10 @@ function updateResident(dt) {
         u.k = u.leaving ? Math.max(0, u.k - dt / 0.4) : Math.min(1, u.k + dt / 0.4);
         if (u.k >= 1) u.time -= dt;
         if (u.time <= 0 && !u.leaving) u.leaving = true;
-        if (u.k >= 1 && p.act === 'lie' && r.bubbleUntil < r.t) r.bubbleText = '💤';
+        if (u.k >= 1 && p.act === 'lie' && r.bubbleUntil < r.t) r.bubbleText = SLEEP_TEXT;
         if (u.leaving && u.k <= 0) {
             r.mode = 'idle'; r.use = null; r.plan = null; r.timer = randIn(0.5, 1.2);
-            if (r.bubbleText === '💤') r.bubbleText = '';
+            if (r.bubbleText === SLEEP_TEXT) r.bubbleText = '';
         }
     }
 }
@@ -1659,7 +1683,7 @@ function arrive() {
 const bubble = document.getElementById('bubble');
 function updateBubble() {
     const r = resident;
-    const sleeping = r.bubbleText === '💤' && r.use?.plan.act === 'lie';
+    const sleeping = r.bubbleText === SLEEP_TEXT && r.use?.plan.act === 'lie';
     const show = r.visible && r.bubbleText && (r.t < r.bubbleUntil || sleeping);
     if (!show) {
         if (!bubble.hidden) bubble.hidden = true;
@@ -2004,9 +2028,11 @@ function limitToOwned(items) {
     const used = {};
     return items.filter(it => (used[it.type] = (used[it.type] || 0) + 1) <= (game.owned[it.type] || 0));
 }
-// その日の品ぞろえ。まだ持っていない家具が出やすい
+// その日の品ぞろえ。取り置きした品物は必ず並ぶ。ほかは、まだ持っていない家具が出やすい
+const MAX_RESERVED = 2;
 function makeStock() {
-    const pool = Object.keys(FURNITURE).map(t => ({ t, w: game.owned[t] ? 1 : 3 })), items = [];
+    const items = game.reserved.slice(0, SHOP_SIZE);
+    const pool = Object.keys(FURNITURE).filter(t => !items.includes(t)).map(t => ({ t, w: game.owned[t] ? 1 : 3 }));
     while (items.length < SHOP_SIZE && pool.length) {
         let r = Math.random() * pool.reduce((s, p) => s + p.w, 0), i = 0;
         while (i < pool.length - 1 && (r -= pool[i].w) > 0) i++;
@@ -2020,7 +2046,7 @@ function clockText() {
     return `${game.day}日目 ${hh}:${String(mm).padStart(2, '0')}`;
 }
 function updateStatus() {
-    coinsEl.textContent = `🪙 ${game.coins.toLocaleString()}`;
+    coinsEl.innerHTML = coinText(game.coins);
     clockEl.textContent = clockText();
 }
 function earn(n) {
@@ -2037,7 +2063,7 @@ function newDay() {
     game.shop = makeStock();
     updateStatus();
     if (shopDialog.open) renderShop();
-    toast(`${game.day}日目の朝。おこづかい 🪙${ALLOWANCE}、お店の品物が入れかわりました`);
+    toast(`${game.day}日目の朝。おこづかい ${ALLOWANCE} コイン、お店の品物が入れかわりました`);
     saveGame();
 }
 // 時計を進める（sec 秒）
@@ -2051,7 +2077,7 @@ setInterval(() => { if (economyReady && !document.hidden && !resetting) advanceC
 // ---- お店 ----
 const shopDialog = document.getElementById('shop-dialog');
 function renderShop() {
-    document.getElementById('shop-coins').textContent = `🪙 ${game.coins.toLocaleString()}`;
+    document.getElementById('shop-coins').innerHTML = coinText(game.coins);
     document.getElementById('shop-day').textContent = `${game.day}日目の品ぞろえ`;
     const list = document.getElementById('shop-list');
     list.innerHTML = '';
@@ -2059,18 +2085,36 @@ function renderShop() {
         const def = FURNITURE[type], sold = game.shop.sold.includes(i), have = game.owned[type] || 0;
         const card = document.createElement('div');
         card.className = 'shop-item' + (sold ? ' sold' : '');
-        card.innerHTML = `<img src="img/${def.art}.webp?v=${APP_VERSION}" alt=""><span class="shop-name"></span><small class="shop-have"></small><button></button>`;
+        const reserved = !sold && game.reserved.includes(type);
+        card.innerHTML = `<img src="img/${def.art}.webp?v=${APP_VERSION}" alt=""><span class="shop-name"></span><small class="shop-have"></small><button class="shop-buy"></button>`;
         card.querySelector('.shop-name').textContent = def.name;
         const tag = card.querySelector('.shop-have');
-        tag.textContent = have ? `持っている ×${have}` : 'NEW';
-        if (!have) tag.classList.add('new');
-        const b = card.querySelector('button');
-        b.textContent = sold ? '売り切れ' : `🪙 ${def.price.toLocaleString()}`;
+        tag.textContent = reserved ? '取り置き中' : have ? `持っている ×${have}` : 'NEW';
+        if (!have || reserved) tag.classList.add('new');
+        const b = card.querySelector('.shop-buy');
+        if (sold) b.textContent = '売り切れ'; else b.innerHTML = coinText(def.price);
         b.disabled = sold || game.coins < def.price;
         if (!sold) b.setAttribute('aria-label', `${def.name}を ${def.price} コインで買う`);
         b.addEventListener('click', () => buy(i));
+        // お金が足りない品物は、取り置きすると、買えるまで品物が入れかわっても残る
+        if (!sold && (reserved || game.coins < def.price)) {
+            const k = document.createElement('button');
+            k.className = 'shop-keep';
+            k.textContent = reserved ? '取り置きをやめる' : '取り置き';
+            k.setAttribute('aria-pressed', String(reserved));
+            k.disabled = !reserved && game.reserved.length >= MAX_RESERVED;
+            if (k.disabled) k.title = `取り置きは ${MAX_RESERVED} つまで`;
+            k.addEventListener('click', () => toggleReserve(type));
+            card.appendChild(k);
+        }
         list.appendChild(card);
     });
+}
+function toggleReserve(type) {
+    if (game.reserved.includes(type)) game.reserved = game.reserved.filter(t => t !== type);
+    else if (game.reserved.length < MAX_RESERVED) { game.reserved.push(type); toast(`${FURNITURE[type].name}を取り置きしました。お金が貯まるまでお店に残ります`); }
+    renderShop();
+    saveGame();
 }
 function buy(i) {
     const type = game.shop.items[i], def = FURNITURE[type];
@@ -2078,6 +2122,7 @@ function buy(i) {
     game.coins -= def.price;
     game.owned[type] = (game.owned[type] || 0) + 1;
     game.shop.sold.push(i);
+    game.reserved = game.reserved.filter(t => t !== type);
     updateStatus();
     renderShop();
     renderCatalog();
@@ -2188,7 +2233,7 @@ function renderPresets() {
     for (const ps of [...game.presets].sort((a, b) => b.savedAt - a.savedAt)) {
         const row = document.createElement('div');
         row.className = 'preset';
-        row.innerHTML = `<div class="preset-info"><b></b><small>${formatDate(ps.savedAt)}・家具 ${ps.items.length} 個</small></div><button class="preset-load primary">呼び出す</button><button class="preset-del" aria-label="消す">🗑</button>`;
+        row.innerHTML = `<div class="preset-info"><b></b><small>${formatDate(ps.savedAt)}・家具 ${ps.items.length} 個</small></div><button class="preset-load primary">呼び出す</button><button class="preset-del" aria-label="消す">${icon('trash')}</button>`;
         row.querySelector('b').textContent = ps.name;
         row.querySelector('.preset-load').addEventListener('click', () => loadPreset(ps.id));
         row.querySelector('.preset-del').addEventListener('click', () => {
@@ -2270,7 +2315,7 @@ window.__lifemaker = {
     addItem(type) { if (available(type) <= 0) { game.owned[type] = (game.owned[type] || 0) + 1; renderCatalog(); } addItem(type); },
     grantAll(n = 5) { for (const t of Object.keys(FURNITURE)) game.owned[t] = Math.max(game.owned[t] || 0, n); renderCatalog(); saveGame(); },
     setStock(items) { game.shop = { day: game.day, items, sold: [] }; if (shopDialog.open) renderShop(); },
-    advanceClock, buy, openShop, DAY_SEC, ALLOWANCE,
+    advanceClock, buy, openShop, toggleReserve, DAY_SEC, ALLOWANCE, SLEEP_TEXT,
     select, rotateSelected, removeSelected, isBlocked, footprint, supportOf: (uid) => supportOf(findItem(uid))?.uid ?? null,
     undo, redo, savePreset, loadPreset, zoomAt, openTint, kindOf, openFit, metaOf, exportFit,
     fit: () => ({ base: fitBase, local: fitLocal, state: { art: fitState.art, kind: fitState.kind, sel: fitState.sel, pts: fitState.pts.map(p => [...p]) } }),

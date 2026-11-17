@@ -190,24 +190,45 @@ Thin dark navy line art, flat muted colors with one soft shade tone. No text, no
 Background: one solid flat magenta color (#FF00FF) everywhere.
 ```
 
+## 壁掛け（窓・絵）は正面から描く
+
+壁掛けは、斜めではなく**真正面から見た平らな絵**で作る。ゲームが壁の角度に合わせて斜めに変形するので、どちらの壁にもぴったり合う。
+（斜めに描かせると、AIは奥行きのある箱として描き、部屋の 30 度とも合わないため、どう変形しても合わなかった）
+
 ## 絵（壁掛け） → `picture.png`
 
 ```
-Same art style as the previous image. Draw a single piece of furniture for the same isometric room game:
-a framed landscape painting hanging on the wall (on the left wall, facing down-right).
-Isometric 2:1 view from above at about 30 degrees, the front of the furniture facing down-left.
-Whole object visible and centered, nothing else in the image.
-Thin dark navy line art, flat muted colors with one soft shade tone. No text, no floor, no shadow.
+Same art style as the previous image. Draw a single wall decoration for the same room game:
+a framed landscape painting (rolling green hills, a small lake, soft clouds) in a dark wooden frame.
+Straight-on front elevation view: perfectly flat and orthographic, as if scanned. NO isometric angle, NO perspective,
+NO depth, NO side faces, NO thickness visible. The outer frame is a perfectly upright rectangle with horizontal top and bottom edges.
+Whole object visible and centered with a small margin, nothing else in the image.
+Thin dark navy line art, flat muted colors with one soft shade tone. No text, no wall, no shadow.
 Background: one solid flat magenta color (#FF00FF) everywhere.
 ```
 
 ## 窓（壁掛け） → `window.png`
 
 ```
-Same art style as the previous image. Draw a single piece of furniture for the same isometric room game:
-a window with muted red curtains (on the back-right wall, facing down-left).
-Isometric 2:1 view from above at about 30 degrees, the front of the furniture facing down-left.
-Whole object visible and centered, nothing else in the image.
-Thin dark navy line art, flat muted colors with one soft shade tone. No text, no floor, no shadow.
+Same art style as the previous image. Draw a single wall decoration for the same room game:
+a rectangular wooden window with a cross-shaped mullion, light blue glass with soft reflections,
+and muted red curtains tied back with gold tassels on both sides, hanging inside the frame.
+Straight-on front elevation view: perfectly flat and orthographic, as if scanned. NO isometric angle, NO perspective,
+NO depth, NO side faces, NO thickness visible. The outer frame is a perfectly upright rectangle with horizontal top and bottom edges.
+Whole object visible and centered with a small margin, nothing else in the image.
+Thin dark navy line art, flat muted colors with one soft shade tone. No text, no wall, no shadow.
+Background: one solid flat magenta color (#FF00FF) everywhere.
+```
+
+## 窓（アーチ）（壁掛け） → `window2.png`
+
+```
+Same art style as the previous image. Draw a single wall decoration for the same room game:
+a tall arched gothic window with a dark wooden frame, night-blue glass with a small crescent moon,
+and a wooden sill at the bottom. The arch is at the top; the sides and the bottom are straight.
+Straight-on front elevation view: perfectly flat and orthographic, as if scanned. NO isometric angle, NO perspective,
+NO depth, NO side faces, NO thickness visible. The outer frame is a perfectly upright rectangle with horizontal top and bottom edges.
+Whole object visible and centered with a small margin, nothing else in the image.
+Thin dark navy line art, flat muted colors with one soft shade tone. No text, no wall, no shadow.
 Background: one solid flat magenta color (#FF00FF) everywhere.
 ```

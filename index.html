@@ -20,16 +20,16 @@
 <meta property="og:image:height" content="512">
 <meta property="og:locale" content="ja_JP">
 <meta name="twitter:card" content="summary">
-<link rel="stylesheet" href="css/style.css?v=0.12.0">
+<link rel="stylesheet" href="css/style.css?v=0.13.0">
 </head>
 <body>
 <div id="app">
     <header>
         <h1>LifeMaker</h1>
         <div class="header-btns">
-            <button id="shop-btn" class="pill-btn" aria-haspopup="dialog">🛒 お店</button>
-            <button id="preset-btn" class="pill-btn" aria-haspopup="dialog">📁 プリセット</button>
-            <button id="menu-btn" class="icon-btn" aria-label="設定" aria-haspopup="dialog">⚙</button>
+            <button id="shop-btn" class="pill-btn" aria-haspopup="dialog"><span data-icon="cart"></span>お店</button>
+            <button id="preset-btn" class="pill-btn" aria-haspopup="dialog"><span data-icon="folder"></span>プリセット</button>
+            <button id="menu-btn" class="icon-btn" aria-label="設定" aria-haspopup="dialog"><span data-icon="settings"></span></button>
         </div>
     </header>
 
@@ -46,8 +46,8 @@
             <div id="toolbar" hidden>
                 <span id="sel-name"></span>
                 <button id="rotate-btn">⇆ 向き</button>
-                <button id="color-btn">🎨 色</button>
-                <button id="fit-btn" hidden>📐 合わせる</button>
+                <button id="color-btn"><span data-icon="palette"></span>色</button>
+                <button id="fit-btn" hidden><span data-icon="fit"></span>合わせる</button>
                 <button id="remove-btn">しまう</button>
                 <button id="done-btn">完了</button>
             </div>
@@ -76,7 +76,7 @@
     </fieldset>
     <fieldset>
         <legend>作る人向け</legend>
-        <label class="check"><input type="checkbox" id="fit-mode-toggle"> 家具の合わせ方を直す「📐 合わせる」を出す</label>
+        <label class="check"><input type="checkbox" id="fit-mode-toggle"> 家具の合わせ方を直す「合わせる」ボタンを出す</label>
     </fieldset>
     <button id="clear-room-btn">部屋を空にする</button>
     <button id="reset-btn" class="danger">全てのデータを消す</button>
@@ -113,7 +113,7 @@
     <canvas id="fit-canvas"></canvas>
     <div class="fit-row">
         <div id="fit-points" class="fit-points" role="group" aria-label="動かす点"></div>
-        <button id="fit-zoom" class="tint-part" aria-pressed="false">🔍 拡大</button>
+        <button id="fit-zoom" class="tint-part" aria-pressed="false"><span data-icon="zoom"></span>拡大</button>
     </div>
     <div class="fit-nudge" role="group" aria-label="選んだ点を少し動かす">
         <button data-nudge="-1,0" aria-label="左へ">←</button>
@@ -140,6 +140,6 @@
 
 <div id="toast" role="status"></div>
 
-<script type="module" src="js/app.js?v=0.12.0"></script>
+<script type="module" src="js/app.js?v=0.13.0"></script>
 </body>
 </html>
